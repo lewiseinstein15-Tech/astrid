@@ -172,6 +172,11 @@ pub async fn run_hook(spec: &HookSpec, payload: &serde_json::Value) -> HookDecis
                 Some(2) => HookDecision::Block {
                     reason: if stdout.is_empty() { "hook blocked the call".into() } else { stdout },
                 },
+                // `sh -c` reports a missing binary as 127 — that is an
+                // infrastructure failure, not a hook decision: fail open.
+                Some(127) => HookDecision::FailOpen {
+                    reason: format!("command not found: {}", spec.command),
+                },
                 Some(code) => HookDecision::Warn {
                     reason: format!("exit {code}: {stdout}"),
                 },
