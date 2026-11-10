@@ -1,0 +1,7 @@
+/target
+**/target
+Cargo.lock.orig
+*.swp
+.DS_Store
+.astrid/
+!docs/assets

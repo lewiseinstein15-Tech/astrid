@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/astrid-core",
+    "crates/astrid-memory",
+    "crates/astrid-workforce",
+    "crates/astrid-providers",
+    "crates/astrid-tools",
+    "crates/astrid-tui",
+    "crates/astrid",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/astrid-os/astrid"
+description = "Astrid — a TUI-native agent operating system in Rust"
+authors = ["Astrid contributors"]
+
+[workspace.dependencies]
+# internal
+astrid-core = { path = "crates/astrid-core" }
+astrid-memory = { path = "crates/astrid-memory" }
+astrid-workforce = { path = "crates/astrid-workforce" }
+astrid-providers = { path = "crates/astrid-providers" }
+astrid-tools = { path = "crates/astrid-tools" }
+astrid-tui = { path = "crates/astrid-tui" }
+
+# async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "time", "sync", "io-util"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# HTTP (providers, web_fetch)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# errors & logging
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# misc
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+sha2 = "0.10"
+regex = "1"
+dirs = "5"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
