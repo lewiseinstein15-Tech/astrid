@@ -139,6 +139,7 @@ name = "astrid-providers"
 version = "0.1.0"
 dependencies = [
  "astrid-core",
+ "async-trait",
  "chrono",
  "reqwest",
  "serde",
@@ -188,6 +189,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "toml",
  "tracing",
 ]
 
