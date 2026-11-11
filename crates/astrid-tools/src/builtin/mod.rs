@@ -1,4 +1,4 @@
-//! The 14 builtin tools, one group per file. All implementations are real —
+//! The 15 builtin tools, one group per file. All implementations are real —
 //! no stubs — and every fs/memory path flows through the shared vocabulary
 //! (confinement, memory verbs, skill index) rather than raw files.
 
@@ -14,7 +14,7 @@ pub use memory::{MemForgetImage, MemRecallTool, MemRememberTool};
 pub use meta::{AgentDelegate, CapabilityReport};
 pub use shell::ShellRun;
 pub use skills::{SkillsList, SkillsLoad};
-pub use web::WebFetch;
+pub use web::{WebFetch, WebSearch};
 
 use astrid_core::{Error, Result};
 use serde_json::Value;

@@ -193,6 +193,7 @@ dependencies = [
  "astrid-core",
  "crossterm",
  "ratatui",
+ "regex",
  "serde_json",
  "tokio",
  "tracing",

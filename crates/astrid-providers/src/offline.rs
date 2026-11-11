@@ -92,6 +92,24 @@ fn call_tool_re() -> &'static Regex {
     })
 }
 
+/// Web search: "search the web for <query>" (also "look up ... for ...").
+fn search_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?is)^(?:search(?: the web)?(?: for)?|look(?: the web)?(?: up)? for)\s+(.+?)\??\s*$"#)
+            .unwrap()
+    })
+}
+
+/// Explicit URL fetch: "fetch https://… [and tell me what it is]".
+fn fetch_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?is)^(?:fetch|open|get)\s+(?:the\s+)?(?:page\s+|url\s+)?(https?://[^\s]+?)(?:\s+and\s+.*)?\s*$"#)
+            .unwrap()
+    })
+}
+
 fn tool_matching<'a>(tools: &'a [crate::chat::ToolSpec], needle: &str) -> Option<&'a str> {
     tools
         .iter()
@@ -158,6 +176,16 @@ fn plan(text: &str, tools: &[crate::chat::ToolSpec]) -> Option<ToolCall> {
             return Some(mk(name, serde_json::json!({})));
         }
     }
+    if let Some(c) = fetch_re().captures(text) {
+        let url = c[1].trim().to_string();
+        return offered("web_fetch")
+            .then(|| mk("web_fetch", serde_json::json!({"url": url})));
+    }
+    if let Some(c) = search_re().captures(text) {
+        let query = c[1].trim().to_string();
+        return offered("web_search")
+            .then(|| mk("web_search", serde_json::json!({"query": query, "max_results": 5})));
+    }
     if let Some(c) = call_tool_re().captures(text) {
         let name = c[1].trim();
         let args_raw = c.get(2).map(|m| m.as_str().trim()).unwrap_or("");
@@ -179,6 +207,184 @@ fn plan(text: &str, tools: &[crate::chat::ToolSpec]) -> Option<ToolCall> {
 }
 
 pub struct OfflineProvider;
+
+/// The tool call that produced the last tool observation: name + parsed args.
+fn observed_call(req: &ChatRequest) -> (String, serde_json::Value, String) {
+    let last_tool = req.messages.iter().rev().find(|m| m.role == Role::Tool);
+    let call = last_tool.and_then(|t| {
+        let id = t.tool_call_id.as_deref()?;
+        req.messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::Assistant && m.tool_calls.iter().any(|c| c.id == id))
+            .and_then(|m| m.tool_calls.iter().find(|c| c.id == id))
+    });
+    let (name, args_json) = call
+        .map(|c| (c.name.clone(), c.arguments_json.clone()))
+        .unwrap_or_else(|| ("unknown".to_string(), "{}".to_string()));
+    let args: serde_json::Value = serde_json::from_str(&args_json).unwrap_or(serde_json::json!({}));
+    let result = last_tool.map(|m| m.content.clone()).unwrap_or_default();
+    (name, args, result)
+}
+
+/// Word-wrap a collapsed line of text into ≤width-char lines.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.chars().count() + word.chars().count() + 1 > width {
+            out.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    out
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let head: String = s.chars().take(max).collect();
+        format!("{head}…")
+    }
+}
+
+/// Compose the deterministic conclusion for a turn whose last step was a tool
+/// observation. Every fact comes from the tool's own output — the composer
+/// arranges, it never invents.
+fn compose_turn_answer(req: &ChatRequest) -> String {
+    let (tool, args, result) = observed_call(req);
+
+    match tool.as_str() {
+        "web_search" => {
+            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("the query");
+            // The tool formats clean markdown bullets; drop its own summary
+            // header (first line + following blank) — the intro carries that.
+            let mut body = result.lines().collect::<Vec<_>>();
+            if body.first().is_some_and(|l| l.starts_with("Web search for")) {
+                body = body
+                    .into_iter()
+                    .skip(1)
+                    .skip_while(|l| l.trim().is_empty())
+                    .collect();
+            }
+            format!(
+                "Here's what I found on the web for **\"{query}\"** — live search, sources linked below.\n\n{}",
+                body.join("\n")
+            )
+        }
+        "web_fetch" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("the URL");
+            let body = result.trim();
+            let lines = wrap_words(body, 96);
+            let mut gist: Vec<String> = lines.into_iter().take(6).collect();
+            if body.chars().count() > 600 {
+                gist.push("…(fetched text truncated — 8000-char cap on the tool)".to_string());
+            }
+            format!(
+                "I fetched **{url}** and here's the gist:\n\n{}\n\nSource: {url}",
+                gist.iter().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n")
+            )
+        }
+        "shell_run" => {
+            let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            let exit = result
+                .lines()
+                .find(|l| l.starts_with("exit "))
+                .unwrap_or("exit ?")
+                .trim()
+                .to_string();
+            let stdout: Vec<&str> = {
+                let mut s = Vec::new();
+                let mut in_stdout = false;
+                for line in result.lines() {
+                    if line == "--- stdout ---" {
+                        in_stdout = true;
+                    } else if line == "--- stderr ---" {
+                        break;
+                    } else if in_stdout && !line.trim().is_empty() {
+                        s.push(line);
+                    }
+                }
+                s
+            };
+            let block = if stdout.is_empty() {
+                "(no stdout)".to_string()
+            } else {
+                stdout
+                    .iter()
+                    .take(5)
+                    .map(|l| format!("  {l}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            format!("Ran `{command}` — {exit}.\n\n{block}")
+        }
+        "fs_write" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("the file");
+            let bytes: String = result
+                .lines()
+                .find(|l| l.contains("byte"))
+                .unwrap_or("done")
+                .trim()
+                .to_string();
+            format!("File saved — {bytes}.\n\nWrote the content to `{path}` as requested.")
+        }
+        "fs_read" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("the file");
+            let body: Vec<&str> = result.lines().take(8).collect();
+            format!(
+                "Contents of `{path}`:\n\n```\n{}\n```",
+                body.join("\n")
+            )
+        }
+        "mem_remember" => {
+            let body = args
+                .get("body")
+                .and_then(|v| v.as_str())
+                .unwrap_or("your note");
+            let page: String = result
+                .split("page ")
+                .nth(1)
+                .map(|p| truncate_chars(p.trim_end_matches(')'), 40))
+                .unwrap_or_default();
+            if page.is_empty() {
+                format!("Noted — I'll remember that **{body}**.")
+            } else {
+                format!("Noted — I'll remember that **{body}**.\n\nStored as memory page `{page}`.")
+            }
+        }
+        "mem_recall" => {
+            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("your query");
+            let hits: Vec<&str> = result
+                .lines()
+                .filter(|l| l.trim_start().starts_with(|c: char| c.is_ascii_digit()))
+                .collect();
+            if hits.is_empty() {
+                format!("No memory hits for **\"{query}\"** — nothing stored matches yet.")
+            } else {
+                format!(
+                    "Found {} memory hit(s) for **\"{query}\"**:\n\n{}",
+                    hits.len(),
+                    hits.join("\n")
+                )
+            }
+        }
+        other => {
+            let mut truncated: String = result.chars().take(400).collect();
+            if result.chars().count() > 400 {
+                truncated.push('…');
+            }
+            format!("`{other}` completed.\n\n{truncated}")
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl Provider for OfflineProvider {
@@ -209,24 +415,14 @@ impl Provider for OfflineProvider {
 
         // After a tool observation the planner concludes deterministically —
         // it never re-plans the same step (which would loop to the budget).
+        // The conclusion is COMPOSED per tool: intro, structured body, source
+        // line — never a raw dump of the receipt.
         if req
             .messages
             .last()
             .is_some_and(|m| m.role == Role::Tool)
         {
-            let result = req
-                .messages
-                .iter()
-                .rev()
-                .find(|m| m.role == Role::Tool)
-                .map(|m| m.content.clone())
-                .unwrap_or_default();
-            let mut truncated: String = result.chars().take(400).collect();
-            if result.chars().count() > 400 {
-                truncated.push('…');
-            }
-            resp.content =
-                Some(format!("Done. Tool result: {truncated}"));
+            resp.content = Some(compose_turn_answer(req));
             return Ok(resp);
         }
 
@@ -357,6 +553,110 @@ mod tests {
             .unwrap();
         assert_eq!(out.tool_calls.len(), 0);
         assert_eq!(out.finish_reason, "stop");
+    }
+
+    #[tokio::test]
+    async fn offline_plans_a_web_search() {
+        let out = OfflineProvider
+            .chat(&req_with_tools(
+                &["web_search", "fs_read"],
+                "search the web for rust programming language",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(out.tool_calls[0].name, "web_search");
+        let args: serde_json::Value =
+            serde_json::from_str(&out.tool_calls[0].arguments_json).unwrap();
+        assert_eq!(args["query"], "rust programming language");
+        assert_eq!(args["max_results"], 5);
+    }
+
+    #[tokio::test]
+    async fn offline_plans_a_url_fetch_without_the_trailing_clause() {
+        let out = OfflineProvider
+            .chat(&req_with_tools(
+                &["web_fetch"],
+                "fetch https://example.com and tell me what it is",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(out.tool_calls[0].name, "web_fetch");
+        let args: serde_json::Value =
+            serde_json::from_str(&out.tool_calls[0].arguments_json).unwrap();
+        assert_eq!(args["url"], "https://example.com");
+    }
+
+    #[tokio::test]
+    async fn composes_a_clean_search_answer_from_the_tool_output() {
+        let result = "Web search for 'rust programming language' — 2 result(s) via wikipedia:\n\n\
+- **Rust (programming language)** — Rust is a general-purpose language emphasizing performance and memory safety.\n  https://en.wikipedia.org/?curid=29414838\n\
+- **Outline of the Rust programming language** — topical guide to Rust.\n  https://en.wikipedia.org/?curid=81297551\n";
+        let req = ChatRequest {
+            system: String::new(),
+            tools: vec![ToolSpec {
+                name: "web_search".into(),
+                description: "t".into(),
+                parameters_json_schema: serde_json::json!({}),
+            }],
+            messages: vec![
+                ChatMessage::user("search the web for rust programming language"),
+                ChatMessage {
+                    role: Role::Assistant,
+                    content: String::new(),
+                    tool_call_id: None,
+                    tool_calls: vec![crate::chat::ToolCall {
+                        id: "call_1".into(),
+                        name: "web_search".into(),
+                        arguments_json: r#"{"query":"rust programming language"}"#.into(),
+                    }],
+                },
+                ChatMessage::tool_result("call_1", result),
+            ],
+            temperature: 0.0,
+            max_tokens: None,
+        };
+        let out = OfflineProvider.chat(&req).await.unwrap();
+        let answer = out.content.unwrap();
+        assert!(answer.contains("Here's what I found on the web"), "got: {answer}");
+        assert!(answer.contains("\"rust programming language\""), "got: {answer}");
+        assert!(answer.contains("**Rust (programming language)**"), "got: {answer}");
+        assert!(answer.contains("https://en.wikipedia.org/?curid=29414838"), "got: {answer}");
+        assert!(!answer.contains("Done. Tool result:"), "got: {answer}");
+    }
+
+    #[tokio::test]
+    async fn composes_a_readable_shell_answer() {
+        let result = "exit 0\n--- stdout ---\ndemo-proof-2026\n\n--- stderr ---\n\n";
+        let req = ChatRequest {
+            system: String::new(),
+            tools: vec![ToolSpec {
+                name: "shell_run".into(),
+                description: "t".into(),
+                parameters_json_schema: serde_json::json!({}),
+            }],
+            messages: vec![
+                ChatMessage::user("run the shell command echo demo-proof-2026"),
+                ChatMessage {
+                    role: Role::Assistant,
+                    content: String::new(),
+                    tool_call_id: None,
+                    tool_calls: vec![crate::chat::ToolCall {
+                        id: "call_2".into(),
+                        name: "shell_run".into(),
+                        arguments_json: r#"{"command":"echo demo-proof-2026"}"#.into(),
+                    }],
+                },
+                ChatMessage::tool_result("call_2", result),
+            ],
+            temperature: 0.0,
+            max_tokens: None,
+        };
+        let out = OfflineProvider.chat(&req).await.unwrap();
+        let answer = out.content.unwrap();
+        assert!(answer.contains("Ran `echo demo-proof-2026`"), "got: {answer}");
+        assert!(answer.contains("exit 0"), "got: {answer}");
+        assert!(answer.contains("demo-proof-2026"), "got: {answer}");
+        assert!(!answer.contains("--- stderr ---"), "got: {answer}");
     }
 
     #[tokio::test]

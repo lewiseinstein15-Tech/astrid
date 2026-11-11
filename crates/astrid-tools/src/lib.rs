@@ -1,6 +1,6 @@
 //! astrid-tools — tool registry, risk ladder, permission gate, builtins.
 //!
-//! The 14 builtins are real implementations behind one pipeline: unknown
+//! The 15 builtins are real implementations behind one pipeline: unknown
 //! check → started receipt → RiskGuard → PreToolUse hooks → permission gate →
 //! approval → execute → terminal receipt (always paired).
 
@@ -13,7 +13,7 @@ pub mod registry;
 pub use astrid_core::Risk;
 pub use builtin::{
     AgentDelegate, CapabilityReport, FsEdit, FsGrep, FsLs, FsRead, FsWrite, MemForgetImage,
-    MemRecallTool, MemRememberTool, ShellRun, SkillsList, SkillsLoad, WebFetch,
+    MemRecallTool, MemRememberTool, ShellRun, SkillsList, SkillsLoad, WebFetch, WebSearch,
 };
 pub use gate::{GateDecision, PermissionGate, RiskGuard};
 pub use plugin::{PluginManifest, PluginTool};

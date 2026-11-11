@@ -46,6 +46,43 @@ enum UiKey {
 
 const SPINNER: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
+/// Inline markdown tokenizer: **bold**, `code`, and bare URLs. One pass,
+/// non-overlapping; everything between stays in the base style.
+fn inline_spans(
+    text: &str,
+    base: ratatui::style::Style,
+    bold: ratatui::style::Style,
+    code: ratatui::style::Style,
+    link: ratatui::style::Style,
+) -> Vec<ratatui::text::Span<'static>> {
+    use ratatui::text::Span;
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"(\*\*[^*]+\*\*|`[^`]+`|https?://[^\s)>,]+)").unwrap()
+    });
+    let mut spans = Vec::new();
+    let mut last = 0usize;
+    for m in re.find_iter(text) {
+        if m.start() > last {
+            spans.push(Span::styled(text[last..m.start()].to_string(), base));
+        }
+        let hit = m.as_str();
+        if let Some(inner) = hit.strip_prefix("**").and_then(|s| s.strip_suffix("**")) {
+            spans.push(Span::styled(inner.to_string(), bold));
+        } else if let Some(inner) = hit.strip_prefix('`').and_then(|s| s.strip_suffix('`')) {
+            spans.push(Span::styled(inner.to_string(), code));
+        } else {
+            spans.push(Span::styled(hit.to_string(), link));
+        }
+        last = m.end();
+    }
+    if last < text.len() {
+        spans.push(Span::styled(text[last..].to_string(), base));
+    }
+    spans
+}
+
 struct Model {
     status: TuiStatus,
     pal: Palette,
@@ -54,6 +91,12 @@ struct Model {
     /// In-flight assistant streaming buffer (None when idle).
     stream_buf: String,
     streaming: bool,
+    /// Full text of the in-flight answer (raw markdown) — the clean block is
+    /// rendered from this at flush time, replacing the raw typing lines.
+    answer_raw: String,
+    /// Index into `lines` where this answer's raw stream lines start.
+    /// usize::MAX = no answer in flight.
+    answer_start: usize,
     /// In-flight reasoning buffer.
     thinking_buf: String,
     /// Scroll offset from the top of the (wrapped) transcript.
@@ -78,6 +121,8 @@ impl Model {
             lines: Vec::new(),
             stream_buf: String::new(),
             streaming: false,
+            answer_raw: String::new(),
+            answer_start: usize::MAX,
             thinking_buf: String::new(),
             scroll: 0,
             follow_tail: true,
@@ -99,10 +144,15 @@ impl Model {
         self.push(ratatui::text::Line::styled(text.into(), self.pal.dim()));
     }
 
-    /// Append streamed content, splitting on newlines into finished lines.
+    /// Append streamed content: the full text is kept in `answer_raw` for the
+    /// final clean render; newline-split raw lines give the live typing look.
     fn stream_append(&mut self, text: &str) {
         self.streaming = true;
         self.thinking_buf.clear();
+        if self.answer_start == usize::MAX {
+            self.answer_start = self.lines.len();
+        }
+        self.answer_raw.push_str(text);
         let mut parts = text.split('\n').peekable();
         while let Some(part) = parts.next() {
             self.stream_buf.push_str(part);
@@ -114,15 +164,94 @@ impl Model {
         }
     }
 
-    /// Close the streaming buffer into the transcript.
+    /// Close the in-flight answer: drop the raw typing lines and render the
+    /// full text as a clean, structured block (headings, bullets, code,
+    /// inline bold/links) so the finished response reads like a document.
     fn flush_stream(&mut self) {
-        if !self.stream_buf.is_empty() {
-            let done = std::mem::take(&mut self.stream_buf);
-            let style = self.pal.italic(self.pal.assistant);
-            self.push(ratatui::text::Line::styled(done, style));
+        if self.answer_start != usize::MAX || !self.answer_raw.is_empty() {
+            if self.answer_start != usize::MAX && self.answer_start <= self.lines.len() {
+                self.lines.truncate(self.answer_start);
+            }
+            let full = std::mem::take(&mut self.answer_raw);
+            for line in self.render_answer_block(&full) {
+                self.push(line);
+            }
         }
+        self.stream_buf.clear();
         self.streaming = false;
         self.thinking_buf.clear();
+        self.answer_start = usize::MAX;
+    }
+
+    /// Render an answer as a document-style block: an agent header rule, then
+    /// headings, bullets, numbered lists, block quotes, fenced code and
+    /// paragraphs with inline markdown styling.
+    fn render_answer_block(&self, text: &str) -> Vec<ratatui::text::Line<'static>> {
+        use ratatui::text::{Line, Span};
+        use ratatui::style::{Modifier, Style};
+
+        let base = self.pal.fg(self.pal.assistant);
+        let bold = Style::default().fg(self.pal.assistant).add_modifier(Modifier::BOLD);
+        let code = Style::default().fg(self.pal.info).add_modifier(Modifier::ITALIC);
+        let link = Style::default().fg(self.pal.accent);
+        let accent_bold = Style::default().fg(self.pal.accent).add_modifier(Modifier::BOLD);
+
+        let mut out = Vec::new();
+        out.push(Line::from(""));
+        out.push(Line::from(vec![
+            Span::styled("▌ ", accent_bold),
+            Span::styled("astrid", accent_bold),
+        ]));
+
+        let mut in_code = false;
+        for raw in text.lines() {
+            let line = raw.trim_end();
+            if let Some(rest) = line.trim_start().strip_prefix("```") {
+                if rest.is_empty() || line.trim_start().starts_with("```") {
+                    in_code = !in_code;
+                    continue;
+                }
+            }
+            if in_code {
+                out.push(Line::from(vec![
+                    Span::styled("  │ ", self.pal.fg(self.pal.border_focus)),
+                    Span::styled(line.to_string(), code),
+                ]));
+                continue;
+            }
+            if line.is_empty() {
+                out.push(Line::from(""));
+                continue;
+            }
+
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') {
+                let heading = trimmed.trim_start_matches('#').trim();
+                out.push(Line::from(vec![
+                    Span::styled("▌ ", accent_bold),
+                    Span::styled(heading.to_string(), accent_bold),
+                ]));
+            } else if let Some(rest) = trimmed.strip_prefix("- ").or(trimmed.strip_prefix("* ")) {
+                let mut spans = vec![Span::styled("  • ", self.pal.bold(self.pal.accent))];
+                spans.extend(inline_spans(rest, base, bold, code, link));
+                out.push(Line::from(spans));
+            } else if let Some(rest) = trimmed.strip_prefix("> ") {
+                let mut spans = vec![Span::styled("  ❝ ", self.pal.italic(self.pal.info))];
+                spans.extend(inline_spans(rest, self.pal.italic(self.pal.info), bold, code, link));
+                out.push(Line::from(spans));
+            } else if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                out.push(Line::from(vec![
+                    Span::styled("  ", base),
+                    Span::styled(trimmed.to_string(), link),
+                ]));
+            } else {
+                let mut spans = vec![Span::styled("  ", base)];
+                spans.extend(inline_spans(trimmed, base, bold, code, link));
+                out.push(Line::from(spans));
+            }
+        }
+        out.push(Line::from(""));
+        out
     }
 
     fn narrate(&mut self, kind: NarrationKind, text: &str) {
@@ -823,4 +952,104 @@ fn grouped_tools(names: &[String]) -> Vec<(&'static str, Vec<String>)> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::text::Line;
+
+    fn model() -> Model {
+        Model::new(TuiStatus {
+            agent_name: "Astrid".into(),
+            session_id: "sess_test".into(),
+            provider_desc: "offline".into(),
+            profile: "auto".into(),
+            tool_names: vec!["fs_read".into()],
+            skill_count: 0,
+            agent_count: 0,
+            memory_pages: 0,
+            data_dir: ".".into(),
+            hook_count: 0,
+            theme: "midnight".into(),
+            ladder_summary: vec![],
+            mcp_lines: vec![],
+            plugin_count: 0,
+        })
+    }
+
+    fn line_text(l: &Line) -> String {
+        l.spans.iter().map(|s| s.content.to_string()).collect()
+    }
+
+    #[test]
+    fn streaming_then_flush_replaces_raw_lines_with_clean_block() {
+        let mut m = model();
+        m.push(Line::styled("you ▸ search the web", ratatui::style::Style::default()));
+        m.stream_append("Here's what I found for **rust**:\n\n- **Rust** — a language\n  https://en.wikipedia.org/?curid=29414838\n\nSource: web");
+        // raw lines pushed mid-stream: 2 completed lines + live buffer
+        assert!(m.lines.len() > 1, "raw newline splits push lines");
+        m.flush_stream();
+        let texts: Vec<String> = m.lines.iter().map(|l| line_text(l)).collect();
+        let joined = texts.join("\n");
+        // the raw dump must be gone; the clean block must be present
+        assert!(texts.iter().any(|t| t.contains("▌ astrid")), "header: {joined}");
+        assert!(joined.contains("• **Rust**") || joined.contains("• Rust"), "bullet: {joined}");
+        assert!(joined.contains("https://en.wikipedia.org/?curid=29414838"), "link: {joined}");
+        // no duplication of the streamed text
+        assert_eq!(joined.matches("a language").count(), 1, "dedup: {joined}");
+        assert!(m.answer_start == usize::MAX && m.answer_raw.is_empty());
+    }
+
+    #[test]
+    fn answer_block_styles_bullets_headings_and_code() {
+        let m = model();
+        let block = m.render_answer_block(
+            "# Summary\n\nTop line with **bold** and `code`.\n\n- first bullet\n- second bullet\n\n```\ncode line\n```\n\n> quoted",
+        );
+        let texts: Vec<String> = block.iter().map(|l| line_text(l)).collect();
+        let joined = texts.join("\n");
+        assert!(joined.contains("▌ Summary"), "heading: {joined}");
+        assert!(joined.contains("• first bullet"), "bullet: {joined}");
+        assert!(joined.contains("• second bullet"), "bullet: {joined}");
+        assert!(joined.contains("│ code line"), "code: {joined}");
+        assert!(joined.contains("❝ quoted"), "quote: {joined}");
+        assert!(joined.contains("**bold**") == false, "bold markers must be consumed: {joined}");
+        assert!(joined.contains("`code`") == false, "code ticks consumed: {joined}");
+        // spans actually styled: bold span exists
+        let bold_spans = block.iter().flat_map(|l| l.spans.iter())
+            .any(|s| s.style.add_modifier.contains(ratatui::style::Modifier::BOLD) && s.content == "bold");
+        assert!(bold_spans, "inline bold span styled");
+    }
+
+    #[test]
+    fn inline_spans_split_bold_code_and_urls() {
+        let spans = inline_spans(
+            "see **this** and `that` at https://example.com/x now",
+            ratatui::style::Style::default(),
+            ratatui::style::Style::default(),
+            ratatui::style::Style::default(),
+            ratatui::style::Style::default(),
+        );
+        let contents: Vec<&str> = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(contents.contains(&"this"), "{contents:?}");
+        assert!(contents.contains(&"that"), "{contents:?}");
+        assert!(contents.contains(&"https://example.com/x"), "{contents:?}");
+        assert!(contents.contains(&"see "), "{contents:?}");
+        assert!(contents.contains(&" and  now") || contents.iter().any(|c| c.contains(" now")), "{contents:?}");
+        // no raw markdown markers survive
+        assert!(!contents.iter().any(|c| c.contains("**")), "{contents:?}");
+        assert!(!contents.iter().any(|c| c.contains('`')), "{contents:?}");
+    }
+
+    #[test]
+    fn fast_path_answers_get_the_block_too() {
+        let mut m = model();
+        m.push(Line::styled("you ▸ hi", ratatui::style::Style::default()));
+        m.stream_append("Hello. I'm Astrid — ready for a task.");
+        m.flush_stream();
+        let joined = m.lines.iter().map(|l| line_text(l)).collect::<Vec<_>>().join("\n");
+        assert!(joined.contains("▌ astrid"), "header: {joined}");
+        assert!(joined.contains("Hello. I'm Astrid"), "body: {joined}");
+    }
 }

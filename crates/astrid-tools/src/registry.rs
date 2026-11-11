@@ -1,4 +1,4 @@
-//! The tool registry: the 14 builtins plus THE pipeline every call goes
+//! The tool registry: the 15 builtins plus THE pipeline every call goes
 //! through (ARCHITECTURE.md §3) — unknown check, started receipt, RiskGuard,
 //! PreToolUse hooks, permission gate, approval, execute, terminal receipt.
 //! Receipts always pair: exactly one terminal event per started receipt.
@@ -141,7 +141,7 @@ impl ToolRegistry {
         }
     }
 
-    /// Register the 14 builtins in menu order.
+    /// Register the 15 builtins in menu order.
     pub fn with_builtins() -> Self {
         use crate::builtin::*;
         let mut registry = Self::new();
@@ -158,6 +158,7 @@ impl ToolRegistry {
             Arc::new(SkillsList),
             Arc::new(SkillsLoad),
             Arc::new(WebFetch),
+            Arc::new(WebSearch::new()),
             Arc::new(AgentDelegate),
             Arc::new(CapabilityReport::new(registry.tool_names.clone())),
         ] {
@@ -807,7 +808,7 @@ mod tests {
     async fn registry_exposes_names_definitions_and_redaction() {
         let registry = ToolRegistry::with_builtins();
         let names = registry.names();
-        assert_eq!(names.len(), 14, "14 builtins registered: {names:?}");
+        assert_eq!(names.len(), 15, "15 builtins registered: {names:?}");
         for expected in [
             "fs_read",
             "fs_write",
@@ -831,7 +832,7 @@ mod tests {
         assert!(registry.get("definitely-not-a-tool").is_none());
 
         let defs = registry.definitions();
-        assert_eq!(defs.len(), 14);
+        assert_eq!(defs.len(), 15);
         for def in &defs {
             assert!(def.description.len() > 10, "{def:?}");
             assert_eq!(def.parameters_json_schema["type"], "object");
@@ -898,7 +899,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            report.content.contains("Tools (14)"),
+            report.content.contains("Tools (15)"),
             "got: {}",
             report.content
         );

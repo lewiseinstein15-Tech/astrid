@@ -133,11 +133,12 @@ mod tests {
             .unwrap();
         assert_eq!(first.content, again.content, "deterministic report");
         assert!(
-            first.content.contains("Tools (14)"),
+            first.content.contains("Tools (15)"),
             "got: {}",
             first.content
         );
         assert!(first.content.contains("fs_read"), "got: {}", first.content);
+        assert!(first.content.contains("web_search"), "got: {}", first.content);
         assert!(first.content.contains("Provider: test provider (mock"));
         assert!(first.content.contains("Staff agents: 12"));
         std::fs::remove_dir_all(root).ok();

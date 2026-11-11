@@ -45,6 +45,11 @@ redesigned, and why — is [docs/PORT-MAP.md](docs/PORT-MAP.md).
   call). See [docs/M5-AGENT-OS.md](docs/M5-AGENT-OS.md).
 * **Plugins**: `plugins/<name>/plugin.toml` manifests load at startup as
   first-class tools — no shell interpolation of model content.
+* **Web search**: `web_search` (DuckDuckGo → Wikipedia fallback) joins
+  `web_fetch` as the egress pair — real results, approval-gated, honest
+  failures. See [docs/M6-WEB-AND-ANSWERS.md](docs/M6-WEB-AND-ANSWERS.md).
+* **Clean answers**: finished responses render as document-style blocks —
+  headings, bullets, code, inline bold and links — instead of raw tool dumps.
 * **Three palettes**: `midnight`, `nordic`, `ember` — one hue per role
   (user, assistant, narration kinds, tool families, approvals). `/theme
   <name>` switches live.
