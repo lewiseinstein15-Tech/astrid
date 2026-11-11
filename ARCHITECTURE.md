@@ -2,7 +2,8 @@
 
 This document is the load-bearing design record. Every crate, every protocol,
 and every decision boundary is listed here. The rendered diagrams live in
-`docs/assets/architecture.svg` and `docs/assets/infrastructure.svg`.
+`docs/assets/astrid-architecture.png` (crate layers + the eight-gate tool
+pipeline) and `docs/assets/astrid-infrastructure.png` (runtime topology).
 
 ## 1. Shape
 

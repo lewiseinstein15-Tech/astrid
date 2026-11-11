@@ -11,6 +11,8 @@ Astrid is a clean-room rebuild of the lessons learned from the Jexi OS project,
 reduced to what actually runs. The port map — what was kept, cut, and
 redesigned, and why — is [docs/PORT-MAP.md](docs/PORT-MAP.md).
 
+![Astrid architecture: crate layers and the eight-gate tool pipeline](docs/assets/astrid-architecture.png)
+
 ## Principles
 
 1. **One live path.** Everything in the tree is wired into the running binary.
