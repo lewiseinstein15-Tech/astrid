@@ -4,14 +4,14 @@
 //! `ladder_slid` reports how many rungs were skipped before the winner — a
 //! silent slide is a measurement bug, not a feature.
 
-use crate::chat::{ChatRequest, Provider};
+use crate::chat::{ChatRequest, Provider, StreamItem};
 use crate::offline::OfflineProvider;
 use crate::openai::OpenAICompatProvider;
 use astrid_core::{Error, ProvidersConfig, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 /// Consecutive failures before a rung is sent to cooldown.
 const COOLDOWN_AFTER_FAILURES: u32 = 3;
@@ -33,6 +33,18 @@ pub struct LadderResult {
     /// Rungs passed over before the winner — skipped (unconfigured /
     /// local-only / cooling down) or attempted-and-failed. A slide is always
     /// visible in the turn receipt; it is never silent.
+    pub ladder_slid: usize,
+    pub attempts: Vec<AttemptRecord>,
+    pub model_calls: usize,
+}
+
+/// Streaming variant of [`LadderResult`]: the receiver carries deltas and
+/// exactly one terminal item. The ladder commits to a rung only after the
+/// stream proves itself (first item is not `Failed`); a pre-commit failure
+/// slides to the next rung exactly like a failed `chat`.
+pub struct LadderStream {
+    pub rx: mpsc::Receiver<StreamItem>,
+    pub provider_id: String,
     pub ladder_slid: usize,
     pub attempts: Vec<AttemptRecord>,
     pub model_calls: usize,
@@ -265,6 +277,163 @@ impl ProviderLadder {
                 format!("{}: {}", r.id, state)
             })
             .collect()
+    }
+
+    /// Streaming walk: same rung order, skips and cooldowns as [`Self::chat`],
+    /// but the winning rung is decided by its stream's first item. A rung
+    /// whose stream fails before proving itself slides to the next rung.
+    pub async fn chat_stream(&self, req: &ChatRequest) -> Result<LadderStream> {
+        let mut attempts: Vec<AttemptRecord> = Vec::new();
+        let mut model_calls: usize = 0;
+        let mut slid: usize = 0;
+        let mut last_error: Option<String> = None;
+
+        for rung in &self.rungs {
+            let Some(provider) = &rung.provider else {
+                attempts.push(AttemptRecord {
+                    provider: rung.id.clone(),
+                    skipped_reason: Some(
+                        rung.skip_reason
+                            .clone()
+                            .unwrap_or_else(|| "unconfigured".into()),
+                    ),
+                    error: None,
+                    latency_ms: 0,
+                });
+                slid += 1;
+                continue;
+            };
+            if let Some(reason) = &rung.skip_reason {
+                attempts.push(AttemptRecord {
+                    provider: rung.id.clone(),
+                    skipped_reason: Some(reason.clone()),
+                    error: None,
+                    latency_ms: 0,
+                });
+                slid += 1;
+                continue;
+            }
+
+            // Cooldown check (guard scoped so it never spans an await).
+            {
+                let mut health = self.health.lock().await;
+                let entry = health.entry(rung.id.clone()).or_default();
+                if let Some(until) = entry.cooldown_until {
+                    if Instant::now() < until {
+                        let remaining = until
+                            .checked_duration_since(Instant::now())
+                            .map(|d| d.as_secs() + 1)
+                            .unwrap_or(1);
+                        let reason = format!(
+                            "cooldown until +{remaining}s (armed after {} consecutive failures)",
+                            entry.consecutive_failures
+                        );
+                        attempts.push(AttemptRecord {
+                            provider: rung.id.clone(),
+                            skipped_reason: Some(reason),
+                            error: None,
+                            latency_ms: 0,
+                        });
+                        slid += 1;
+                        continue;
+                    }
+                }
+            }
+
+            let started = Instant::now();
+            model_calls += 1;
+            let mut rx = match provider.chat_stream(req).await {
+                Ok(rx) => rx,
+                Err(e) => {
+                    self.note_failure(&rung.id, &e.to_string()).await;
+                    attempts.push(AttemptRecord {
+                        provider: rung.id.clone(),
+                        skipped_reason: None,
+                        error: Some(e.to_string()),
+                        latency_ms: started.elapsed().as_millis() as u64,
+                    });
+                    slid += 1;
+                    last_error = Some(e.to_string());
+                    continue;
+                }
+            };
+
+            // The stream must prove itself before the ladder commits.
+            match rx.recv().await {
+                Some(StreamItem::Failed(e)) => {
+                    self.note_failure(&rung.id, &e).await;
+                    attempts.push(AttemptRecord {
+                        provider: rung.id.clone(),
+                        skipped_reason: None,
+                        error: Some(e.clone()),
+                        latency_ms: started.elapsed().as_millis() as u64,
+                    });
+                    slid += 1;
+                    tracing::warn!(provider = %rung.id, error = %e, "stream failed before commit; sliding");
+                    last_error = Some(e);
+                    continue;
+                }
+                Some(item) => {
+                    attempts.push(AttemptRecord {
+                        provider: rung.id.clone(),
+                        skipped_reason: None,
+                        error: None,
+                        latency_ms: started.elapsed().as_millis() as u64,
+                    });
+                    let mut health = self.health.lock().await;
+                    *health.entry(rung.id.clone()).or_default() = RungHealth::default();
+                    drop(health);
+                    // Forward the proven item plus the rest of the stream.
+                    let (tx, out_rx) = mpsc::channel::<StreamItem>(256);
+                    tokio::spawn(async move {
+                        let _ = tx.send(item).await;
+                        while let Some(x) = rx.recv().await {
+                            if tx.send(x).await.is_err() {
+                                return;
+                            }
+                        }
+                    });
+                    return Ok(LadderStream {
+                        rx: out_rx,
+                        provider_id: rung.id.clone(),
+                        ladder_slid: slid,
+                        attempts,
+                        model_calls,
+                    });
+                }
+                None => {
+                    let e = "stream closed without items".to_string();
+                    self.note_failure(&rung.id, &e).await;
+                    attempts.push(AttemptRecord {
+                        provider: rung.id.clone(),
+                        skipped_reason: None,
+                        error: Some(e.clone()),
+                        latency_ms: started.elapsed().as_millis() as u64,
+                    });
+                    slid += 1;
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(Error::Provider(last_error.unwrap_or_else(|| {
+            "all ladder rungs failed (including offline)".to_string()
+        })))
+    }
+
+    /// Shared failure bookkeeping: consecutive-failure count and cooldown arming.
+    async fn note_failure(&self, id: &str, error: &str) {
+        let mut health = self.health.lock().await;
+        let entry = health.entry(id.to_string()).or_default();
+        entry.consecutive_failures += 1;
+        if entry.consecutive_failures >= COOLDOWN_AFTER_FAILURES {
+            let secs = parse_retry_after(error)
+                .map(|d| d.as_secs())
+                .filter(|s| *s > 0)
+                .unwrap_or(COOLDOWN_SECS);
+            entry.cooldown_until = Some(Instant::now() + Duration::from_secs(secs));
+            tracing::warn!(provider = %id, secs, "rung sent to cooldown");
+        }
     }
 }
 
@@ -508,5 +677,60 @@ mod tests {
         );
         assert_eq!(parse_retry_after("no marker here"), None);
         assert_eq!(parse_retry_after("(retry-after Ns)"), None);
+    }
+
+    async fn drain_stream(mut s: LadderStream) -> Vec<StreamItem> {
+        let mut items = Vec::new();
+        while let Some(item) = s.rx.recv().await {
+            items.push(item);
+        }
+        items
+    }
+
+    #[tokio::test]
+    async fn streaming_offline_serves_final_without_deltas() {
+        let ladder = ProviderLadder::from_config(&ProvidersConfig::default());
+        let mut out = ladder.chat_stream(&req()).await.unwrap();
+        assert_eq!(out.provider_id, "offline");
+        assert_eq!(out.ladder_slid, 0);
+        assert_eq!(out.model_calls, 1);
+        let items = drain_stream(out).await;
+        assert_eq!(items.len(), 1, "offline emits exactly one terminal item");
+        assert!(matches!(items[0], StreamItem::Final(_)));
+    }
+
+    #[tokio::test]
+    async fn streaming_failure_before_commit_slides_to_offline() {
+        let base = crate::test_support::spawn_mock(crate::test_support::ERR_500_BODY).await;
+        let mut cfg = ProvidersConfig::default();
+        cfg.ladder = vec!["mock".into()];
+        cfg.providers.insert("mock".into(), provider_cfg(&base));
+        let ladder = ProviderLadder::from_config(&cfg);
+        let mut out = ladder.chat_stream(&req()).await.unwrap();
+        assert_eq!(out.provider_id, "offline", "failed stream must slide");
+        assert_eq!(out.ladder_slid, 1);
+        assert!(out.attempts[0].error.as_deref().unwrap().contains("HTTP 500"));
+        let items = drain_stream(out).await;
+        assert!(matches!(items.last(), Some(StreamItem::Final(_))));
+    }
+
+    #[tokio::test]
+    async fn streaming_cooldown_skips_rung_like_chat() {
+        let base = crate::test_support::spawn_mock(crate::test_support::ERR_500_BODY).await;
+        let mut cfg = ProvidersConfig::default();
+        cfg.ladder = vec!["mock".into()];
+        cfg.providers.insert("mock".into(), provider_cfg(&base));
+        let ladder = ProviderLadder::from_config(&cfg);
+        for _ in 0..3 {
+            let mut out = ladder.chat_stream(&req()).await.unwrap();
+            assert_eq!(out.provider_id, "offline");
+        }
+        let mut out = ladder.chat_stream(&req()).await.unwrap();
+        assert_eq!(out.attempts.len(), 2, "cooldown must skip the mock rung");
+        assert!(out.attempts[0]
+            .skipped_reason
+            .as_deref()
+            .unwrap()
+            .starts_with("cooldown until"));
     }
 }

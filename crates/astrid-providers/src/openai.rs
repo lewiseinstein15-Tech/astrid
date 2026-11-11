@@ -2,10 +2,12 @@
 //! against any endpoint speaking the `/chat/completions` wire format, e.g.
 //! Ollama (`http://127.0.0.1:11434/v1`), Groq, OpenRouter, vLLM.
 
-use crate::chat::{ChatMessage, ChatRequest, ChatResponse, Provider, Role, ToolCall, ToolSpec};
+use crate::chat::{ChatMessage, ChatRequest, ChatResponse, Provider, Role, StreamItem, ToolCall, ToolSpec};
 use astrid_core::{Error, Result};
+use futures_util::StreamExt;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// Body-truncation cap for provider error strings.
@@ -349,6 +351,197 @@ impl Provider for OpenAICompatProvider {
             provider: self.id.clone(),
         })
     }
+
+    /// SSE streaming (`"stream": true`). Emits `Delta` items as content
+    /// chunks arrive, `Thinking` for reasoning streams (e.g. DeepSeek's
+    /// `reasoning_content`), and assembles tool-call fragments by index into
+    /// the final `ChatResponse`.
+    async fn chat_stream(
+        &self,
+        req: &ChatRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamItem>> {
+        let url = format!("{}/chat/completions", self.base_url);
+        let mut body = build_request_body(req, &self.model);
+        body["stream"] = Value::Bool(true);
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<StreamItem>(256);
+        let mut call = self
+            .client
+            .post(&url)
+            .header("accept", "text/event-stream")
+            .json(&body);
+        if let Some(key) = &self.api_key {
+            call = call.bearer_auth(key);
+        }
+
+        // Pre-flight: connection/HTTP-status errors must slide the ladder
+        // BEFORE any delta is committed, so build the response here and only
+        // then hand the byte stream to the pump task.
+        let response = match call.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = tx.send(StreamItem::Failed(format!(
+                    "{}: request failed: {e}",
+                    self.id
+                ))).await;
+                return Ok(rx);
+            }
+        };
+        let status = response.status();
+        if !status.is_success() {
+            let text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unreadable error body".to_string());
+            let _ = tx
+                .send(StreamItem::Failed(format!(
+                    "{}: HTTP {} {}",
+                    self.id,
+                    status.as_u16(),
+                    Self::truncate_chars(text.trim(), ERROR_BODY_MAX_CHARS)
+                )))
+                .await;
+            return Ok(rx);
+        }
+
+        let id = self.id.clone();
+        let bytes = response.bytes_stream();
+        tokio::spawn(async move {
+            let mut stream = bytes;
+            let mut content = String::new();
+            let mut thinking = String::new();
+            let mut finish_reason = String::new();
+            // tool-call fragments keyed by stream index
+            let mut calls: BTreeMap<usize, (String, String, String)> = BTreeMap::new();
+            let mut buf = String::new();
+            let mut done = false;
+
+            'outer: while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(bytes) => {
+                        buf.push_str(&String::from_utf8_lossy(&bytes));
+                        // SSE events are separated by blank lines; lines by \n.
+                        while let Some(pos) = buf.find('\n') {
+                            let line: String = buf.drain(..=pos).collect();
+                            let line = line.trim_end_matches(['\n', '\r']);
+                            if line.is_empty() || line.starts_with(':') {
+                                continue;
+                            }
+                            let Some(data) = line.strip_prefix("data:") else {
+                                continue;
+                            };
+                            let data = data.trim();
+                            if data == "[DONE]" {
+                                done = true;
+                                break 'outer;
+                            }
+                            let Ok(v) = serde_json::from_str::<Value>(data) else {
+                                continue;
+                            };
+                            // error objects mid-stream
+                            if let Some(err) = v.get("error") {
+                                let _ = tx
+                                    .send(StreamItem::Failed(format!(
+                                        "{id}: stream error: {err}"
+                                    )))
+                                    .await;
+                                return;
+                            }
+                            let Some(choice) = v
+                                .get("choices")
+                                .and_then(Value::as_array)
+                                .and_then(|c| c.first())
+                            else {
+                                continue;
+                            };
+                            if let Some(fr) = choice.get("finish_reason").and_then(Value::as_str) {
+                                finish_reason = fr.to_string();
+                            }
+                            let Some(delta) = choice.get("delta") else {
+                                continue;
+                            };
+                            if let Some(reasoning) =
+                                delta.get("reasoning_content").and_then(Value::as_str)
+                            {
+                                thinking.push_str(reasoning);
+                                let _ = tx.send(StreamItem::Thinking(reasoning.to_string())).await;
+                            }
+                            if let Some(text) = delta.get("content").and_then(Value::as_str) {
+                                if !text.is_empty() {
+                                    content.push_str(text);
+                                    let _ = tx.send(StreamItem::Delta(text.to_string())).await;
+                                }
+                            }
+                            if let Some(tc_list) =
+                                delta.get("tool_calls").and_then(Value::as_array)
+                            {
+                                for tc in tc_list {
+                                    let idx =
+                                        tc.get("index").and_then(Value::as_u64).unwrap_or(0)
+                                            as usize;
+                                    let entry = calls.entry(idx).or_default();
+                                    if let Some(idv) = tc.get("id").and_then(Value::as_str) {
+                                        entry.0.push_str(idv);
+                                    }
+                                    if let Some(fname) = tc
+                                        .get("function")
+                                        .and_then(|f| f.get("name"))
+                                        .and_then(Value::as_str)
+                                    {
+                                        entry.1.push_str(fname);
+                                    }
+                                    if let Some(fargs) = tc
+                                        .get("function")
+                                        .and_then(|f| f.get("arguments"))
+                                        .and_then(Value::as_str)
+                                    {
+                                        entry.2.push_str(fargs);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx
+                            .send(StreamItem::Failed(format!("{id}: stream read failed: {e}")))
+                            .await;
+                        return;
+                    }
+                }
+            }
+
+            if !done && finish_reason.is_empty() && content.is_empty() && calls.is_empty() {
+                let _ = tx
+                    .send(StreamItem::Failed(format!(
+                        "{id}: stream ended without data (connection closed early)"
+                    )))
+                    .await;
+                return;
+            }
+
+            let tool_calls: Vec<ToolCall> = calls
+                .into_values()
+                .map(|(id, name, arguments)| ToolCall {
+                    id,
+                    name,
+                    arguments_json: arguments,
+                })
+                .collect();
+            let _ = tx
+                .send(StreamItem::Final(ChatResponse {
+                    content: if content.is_empty() { None } else { Some(content) },
+                    tool_calls,
+                    finish_reason: if finish_reason.is_empty() {
+                        "stop".to_string()
+                    } else {
+                        finish_reason
+                    },
+                    provider: id,
+                }))
+                .await;
+        });
+        Ok(rx)
+    }
 }
 
 #[cfg(test)]
@@ -485,5 +678,54 @@ mod tests {
             d.contains("test-model") && d.contains("keyless"),
             "got: {d}"
         );
+    }
+
+    #[tokio::test]
+    async fn sse_stream_emits_deltas_then_final_with_assembled_tool_calls() {
+        let events = vec![
+            serde_json::json!({"choices":[{"index":0,"delta":{"role":"assistant","content":"hel"}}]}).to_string(),
+            serde_json::json!({"choices":[{"index":0,"delta":{"content":"lo "}}]}).to_string(),
+            serde_json::json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_9","function":{"name":"fs_ls","arguments":"{\"pa"}}]}}]}).to_string(),
+            serde_json::json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\".\"}"}}]}}]}).to_string(),
+            serde_json::json!({"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}).to_string(),
+            "[DONE]".to_string(),
+        ];
+        let base = crate::test_support::spawn_sse_mock(events).await;
+        let mut out = provider(&base)
+            .chat_stream(&ChatRequest::default())
+            .await
+            .unwrap();
+        let mut deltas = Vec::new();
+        let mut final_resp = None;
+        while let Some(item) = out.recv().await {
+            match item {
+                StreamItem::Delta(d) => deltas.push(d),
+                StreamItem::Final(r) => final_resp = Some(r),
+                other => panic!("unexpected item: {other:?}"),
+            }
+        }
+        assert_eq!(deltas, vec!["hel".to_string(), "lo ".to_string()]);
+        let resp = final_resp.expect("stream must end with Final");
+        assert_eq!(resp.content.as_deref(), Some("hello "));
+        assert_eq!(resp.finish_reason, "tool_calls");
+        let call = &resp.tool_calls[0];
+        assert_eq!(call.id, "call_9");
+        assert_eq!(call.name, "fs_ls");
+        assert_eq!(call.arguments_json, "{\"path\":\".\"}");
+    }
+
+    #[tokio::test]
+    async fn sse_stream_error_yields_failed_item() {
+        let base = crate::test_support::spawn_mock(crate::test_support::ERR_500_BODY).await;
+        let mut out = provider(&base)
+            .chat_stream(&ChatRequest::default())
+            .await
+            .unwrap();
+        let mut items = Vec::new();
+        while let Some(item) = out.recv().await {
+            items.push(item);
+        }
+        assert_eq!(items.len(), 1);
+        assert!(matches!(&items[0], StreamItem::Failed(e) if e.contains("HTTP 500")));
     }
 }

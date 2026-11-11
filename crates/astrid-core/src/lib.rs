@@ -10,7 +10,10 @@ pub mod hooks;
 pub mod ids;
 pub mod kernel;
 
-pub use config::{AstridConfig, HooksConfig, Profile, ProviderConfig, ProvidersConfig};
+pub use config::{
+    AstridConfig, HooksConfig, McpConfig, McpServerConfig, PluginsConfig, Profile, ProviderConfig,
+    ProvidersConfig, TuiConfig,
+};
 pub use error::{Error, Result};
 pub use events::{
     redact_args, Event, NarrationKind, Receipt, ReceiptStatus, Risk, TurnOutcome,

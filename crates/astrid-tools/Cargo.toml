@@ -12,6 +12,7 @@ astrid-memory = { workspace = true }
 astrid-workforce = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 regex = { workspace = true }

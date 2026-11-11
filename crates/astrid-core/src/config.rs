@@ -78,6 +78,82 @@ impl Default for HooksConfig {
     }
 }
 
+/// TUI appearance. Themes live in `astrid-tui/src/theme.rs`; `/theme` switches
+/// live (TUI-side), the config value is the startup default.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TuiConfig {
+    /// One of: `midnight` (default), `nordic`, `ember`.
+    pub theme: String,
+}
+
+impl Default for TuiConfig {
+    fn default() -> Self {
+        Self {
+            theme: "midnight".to_string(),
+        }
+    }
+}
+
+/// One stdio MCP server to launch and wire at startup. The server speaks
+/// JSON-RPC 2.0 over stdin/stdout (MCP `stdio` transport).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpServerConfig {
+    /// Unique short id, used in tool names (`mcp_{server}_{tool}`).
+    pub name: String,
+    /// Executable to spawn.
+    pub command: String,
+    /// Argument vector for the executable.
+    pub args: Vec<String>,
+    /// Extra environment for the server process.
+    pub env: BTreeMap<String, String>,
+    /// Skip this server without spawning it.
+    pub enabled: bool,
+    /// Risk class override for this server's tools
+    /// (`safe|medium|high|external`). Default `high`: external code is
+    /// untrusted (MCP spec: clients SHOULD confirm sensitive operations).
+    pub default_risk: Option<String>,
+}
+
+impl Default for McpServerConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            command: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            enabled: true,
+            default_risk: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpConfig {
+    pub enabled: bool,
+    pub servers: Vec<McpServerConfig>,
+    /// Per-request timeout for tools/list and tools/call.
+    pub timeout_ms: u64,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            servers: Vec::new(),
+            timeout_ms: 15_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct PluginsConfig {
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AstridConfig {
@@ -90,6 +166,9 @@ pub struct AstridConfig {
     pub agent_name: String,
     pub providers: ProvidersConfig,
     pub hooks: HooksConfig,
+    pub tui: TuiConfig,
+    pub mcp: McpConfig,
+    pub plugins: PluginsConfig,
 }
 
 impl Default for AstridConfig {
@@ -101,6 +180,9 @@ impl Default for AstridConfig {
             agent_name: "Astrid".to_string(),
             providers: ProvidersConfig::default(),
             hooks: HooksConfig::default(),
+            tui: TuiConfig::default(),
+            mcp: McpConfig::default(),
+            plugins: PluginsConfig::default(),
         }
     }
 }
@@ -137,7 +219,7 @@ impl AstridConfig {
         let value: toml::Value = toml::from_str(&raw)?;
         let mut warnings = Vec::new();
         if let Some(table) = value.as_table() {
-            let known = ["data_dir", "permissions", "max_turn_steps", "agent_name", "providers", "hooks"];
+            let known = ["data_dir", "permissions", "max_turn_steps", "agent_name", "providers", "hooks", "tui", "mcp", "plugins"];
             for key in table.keys() {
                 if !known.contains(&key.as_str()) {
                     warnings.push(format!("unknown config key `{key}` (ignored)"));

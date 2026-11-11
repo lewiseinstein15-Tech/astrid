@@ -95,6 +95,24 @@ pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
+/// Registry-safe tool-name fragment: lowercase ASCII alphanumerics, other
+/// characters folded to `_`, capped at 40 chars. Shared by the plugin loader
+/// and the MCP adapters so provenance prefixes stay consistent.
+pub fn sanitize_fragment(name: &str) -> String {
+    let mut out: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    out.truncate(40);
+    out
+}
+
 async fn emit(ctx: &ToolCtx, event: Event) {
     // A dropped event bus must not fail the tool that emitted into it.
     let _ = ctx.events.send(event).await;

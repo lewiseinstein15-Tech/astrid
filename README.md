@@ -33,6 +33,22 @@ redesigned, and why — is [docs/PORT-MAP.md](docs/PORT-MAP.md).
 6. **Rust only, TUI only.** No web server, no browser bundle, no Electron, no
    desktop app. The terminal is the product.
 
+## Agent OS surface (M5)
+
+* **Streaming**: token deltas stream live from OpenAI-compatible providers
+  (SSE, tool-call fragments re-assembled); without a provider the offline
+  agent streams paced reveals, so the transcript always types.
+* **Narration**: every phase of a turn speaks — ack, acting, progress,
+  completion — with a dedicated icon and hue.
+* **MCP**: stdio MCP servers wire into the same registry and receipt pipeline
+  as builtins; tools default to High risk (approval before first external
+  call). See [docs/M5-AGENT-OS.md](docs/M5-AGENT-OS.md).
+* **Plugins**: `plugins/<name>/plugin.toml` manifests load at startup as
+  first-class tools — no shell interpolation of model content.
+* **Three palettes**: `midnight`, `nordic`, `ember` — one hue per role
+  (user, assistant, narration kinds, tool families, approvals). `/theme
+  <name>` switches live.
+
 ## Crates
 
 | Crate | What it is |
@@ -40,9 +56,10 @@ redesigned, and why — is [docs/PORT-MAP.md](docs/PORT-MAP.md).
 | `astrid-core` | Events, receipts, config, errors, kernel intent gate, hook contract |
 | `astrid-memory` | Five-verb memory protocol, markdown-backed store, BM25-lite hybrid search |
 | `astrid-workforce` | Curated agent roster, divisions, skills discovery (`SKILL.md`) |
-| `astrid-providers` | Provider ladder, OpenAI-compatible client, deterministic offline fallback |
-| `astrid-tools` | Tool registry, risk ladder, permission gate, path confinement, builtins |
-| `astrid-tui` | ratatui terminal surface: transcript, receipt cards, approvals |
+| `astrid-providers` | Provider ladder with SSE streaming, OpenAI-compatible client, deterministic offline fallback |
+| `astrid-tools` | Tool registry, risk ladder, permission gate, path confinement, builtins, manifest plugins |
+| `astrid-mcp` | MCP stdio client: server handshake, tool discovery, adapters behind the receipt pipeline |
+| `astrid-tui` | Themed ratatui surface: streaming transcript, receipt cards, narration, approvals |
 | `astrid` | The binary: composition root, agent turn loop, eval harness |
 
 ## Quick start

@@ -1,0 +1,16 @@
+[package]
+name = "astrid-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+
+[dependencies]
+astrid-core = { workspace = true }
+astrid-tools = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["process", "io-util"] }
+tracing = { workspace = true }

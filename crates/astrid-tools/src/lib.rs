@@ -7,6 +7,7 @@
 pub mod builtin;
 pub mod confinement;
 pub mod gate;
+pub mod plugin;
 pub mod registry;
 
 pub use astrid_core::Risk;
@@ -15,9 +16,10 @@ pub use builtin::{
     MemRecallTool, MemRememberTool, ShellRun, SkillsList, SkillsLoad, WebFetch,
 };
 pub use gate::{GateDecision, PermissionGate, RiskGuard};
+pub use plugin::{PluginManifest, PluginTool};
 pub use registry::{
-    refusal_reason_of, ApprovalSink, DelegateSink, Tool, ToolCtx, ToolDefinition, ToolOutput,
-    ToolRegistry,
+    refusal_reason_of, sanitize_fragment, ApprovalSink, DelegateSink, Tool, ToolCtx,
+    ToolDefinition, ToolOutput, ToolRegistry,
 };
 
 /// Test-only support: tempdirs, recording approval/delegate sinks and a

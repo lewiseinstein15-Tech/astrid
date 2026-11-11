@@ -110,6 +110,20 @@ pub struct ChatResponse {
     pub provider: String,
 }
 
+/// One item on a streaming chat channel. Deltas arrive first; exactly one
+/// terminal item (`Final` or `Failed`) closes the stream.
+#[derive(Debug, Clone)]
+pub enum StreamItem {
+    /// A chunk of assistant-visible content.
+    Delta(String),
+    /// A chunk of reasoning text (surfaced dim in the transcript).
+    Thinking(String),
+    /// Terminal failure of this stream (after deltas may have flowed).
+    Failed(String),
+    /// Terminal success: the fully assembled response.
+    Final(ChatResponse),
+}
+
 /// The one provider contract every rung implements. Loopback endpoints are
 /// "local"; the ladder uses that (not key presence) for its hermetic switch.
 #[async_trait::async_trait]
@@ -118,6 +132,26 @@ pub trait Provider: Send + Sync {
     fn describe(&self) -> String;
     fn is_local(&self) -> bool;
     async fn chat(&self, req: &ChatRequest) -> astrid_core::Result<ChatResponse>;
+
+    /// Streaming variant. Returns a receiver that carries deltas and exactly
+    /// one terminal item. Default: run [`Provider::chat`] to completion, then
+    /// hand the result over as `Final` (no deltas) — providers without SSE
+    /// support keep working, and the session fills the gap with paced reveal.
+    async fn chat_stream(
+        &self,
+        req: &ChatRequest,
+    ) -> astrid_core::Result<tokio::sync::mpsc::Receiver<StreamItem>> {
+        let (tx, rx) = tokio::sync::mpsc::channel::<StreamItem>(16);
+        match self.chat(req).await {
+            Ok(resp) => {
+                let _ = tx.send(StreamItem::Final(resp)).await;
+            }
+            Err(e) => {
+                let _ = tx.send(StreamItem::Failed(e.to_string())).await;
+            }
+        }
+        Ok(rx)
+    }
 }
 
 #[cfg(test)]

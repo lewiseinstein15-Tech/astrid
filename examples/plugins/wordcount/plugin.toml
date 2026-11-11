@@ -1,0 +1,11 @@
+# Demo plugin: counts words in a piece of text.
+# Installed by copying this directory into <data_dir>/plugins/wordcount/.
+name = "wordcount"
+description = "Count words in a piece of text; pass {\"text\": \"...\"}"
+risk = "safe"
+run = ["bash", "{dir}/run.sh"]
+
+[args_schema]
+type = "object"
+properties.text = { type = "string" }
+required = ["text"]

@@ -6,11 +6,12 @@ use astrid_core::{
     capability_reply, classify, new_id, now_iso, small_talk_reply, Event, HookRegistry, Intent,
     NarrationKind, Profile, TurnOutcome,
 };
+use astrid_mcp::McpClient;
 use astrid_memory::MemoryKernel;
 use astrid_providers::{
-    ChatMessage, ChatRequest, LadderResult, ProviderLadder, Role, ToolSpec,
+    ChatMessage, ChatRequest, LadderStream, ProviderLadder, Role, StreamItem, ToolSpec,
 };
-use astrid_tools::{ApprovalSink, DelegateSink, ToolCtx, ToolOutput, ToolRegistry};
+use astrid_tools::{ApprovalSink, DelegateSink, PluginTool, Tool, ToolCtx, ToolOutput, ToolRegistry};
 use astrid_tui::ApprovalBridge;
 use astrid_workforce::{Roster, SkillIndex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,6 +44,14 @@ pub struct Session {
     pub hooks: Arc<HookRegistry>,
     pub ladder: Arc<ProviderLadder>,
     pub provider_desc: String,
+    /// Live MCP server clients (kept alive for the session; adapters hold Arcs).
+    pub mcp_clients: Vec<Arc<McpClient>>,
+    /// One line per MCP server: connection outcome, shown by /mcp and the TUI.
+    pub mcp_report: Vec<String>,
+    /// Plugin tool names loaded from `plugins/*/plugin.toml`.
+    pub plugin_names: Vec<String>,
+    /// Plugin manifests that failed to load — visible, never silent.
+    pub plugin_problems: Vec<String>,
     /// Live approval bridge (TUI mode answers y/n; headless modes ignore it).
     pub approval_bridge: Arc<astrid_tui::ApprovalBridge>,
     events: mpsc::Sender<Event>,
@@ -75,6 +84,63 @@ impl Session {
             .expect("registry not yet shared");
         reg_mut.gate = astrid_tools::PermissionGate { profile: cfg.permissions };
 
+        // ---- plugins: manifest tools wired into the same registry ----
+        let mut plugin_names = Vec::new();
+        let mut plugin_problems = Vec::new();
+        if cfg.plugins.enabled {
+            let (plugin_tools, problems) = PluginTool::scan(&data_dir);
+            for tool in plugin_tools {
+                plugin_names.push(tool.name().to_string());
+                reg_mut.register(Arc::new(tool));
+            }
+            plugin_problems = problems;
+        }
+
+        // ---- MCP servers: spawn, handshake, adapt tools into the registry ----
+        let mut mcp_clients = Vec::new();
+        let mut mcp_report = Vec::new();
+        if cfg.mcp.enabled {
+            for server_cfg in &cfg.mcp.servers {
+                let name = &server_cfg.name;
+                if !server_cfg.enabled {
+                    mcp_report.push(format!("{name}: disabled in config"));
+                    continue;
+                }
+                match astrid_mcp::connect_and_adapt(server_cfg, cfg.mcp.timeout_ms).await {
+                    Ok((client, adapters)) => {
+                        let count = adapters.len();
+                        for adapter in adapters {
+                            if reg_mut.get(adapter.name()).is_some() {
+                                mcp_report.push(format!(
+                                    "{name}: tool {} skipped (name collision)",
+                                    adapter.name()
+                                ));
+                                continue;
+                            }
+                            reg_mut.register(Arc::new(adapter));
+                        }
+                        let info = client.server_info();
+                        let server_name = info
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(name);
+                        let version = info
+                            .get("version")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?");
+                        mcp_report.push(format!(
+                            "{name}: ✓ {server_name} v{version} · {count} tools"
+                        ));
+                        mcp_clients.push(client);
+                    }
+                    Err(e) => {
+                        tracing::warn!(server = %name, error = %e, "mcp server failed to connect");
+                        mcp_report.push(format!("{name}: ✗ {e}"));
+                    }
+                }
+            }
+        }
+
         let ladder = Arc::new(ProviderLadder::from_config(&cfg.providers));
         let provider_desc = ladder
             .rung_summary()
@@ -85,9 +151,11 @@ impl Session {
         let session_started = Event::SessionStarted {
             session_id: session_id.clone(),
             config_fingerprint: format!(
-                "profile={} providers={}",
+                "profile={} providers={} mcp={} plugins={}",
                 cfg.permissions.as_str(),
-                cfg.providers.ladder.join(",")
+                cfg.providers.ladder.join(","),
+                mcp_clients.len(),
+                plugin_names.len(),
             ),
         };
         let (pump, rx) = EventPump::start(data_dir.join("events.jsonl"), session_started);
@@ -103,6 +171,10 @@ impl Session {
             hooks,
             ladder,
             provider_desc,
+            mcp_clients,
+            mcp_report,
+            plugin_names,
+            plugin_problems,
             approval_bridge: bridge.clone(),
             events: pump.tx.clone(),
             approval_flow: match headless {
@@ -160,28 +232,67 @@ impl Session {
         match classify(input) {
             Intent::SmallTalk => {
                 let reply = small_talk_reply(input);
-                self.emit(Event::MessageDelta {
-                    turn_id: turn_id.clone(),
-                    text: reply.clone(),
-                })
-                .await;
+                self.stream_paced(&turn_id, &reply).await;
                 Ok(self
                     .close_turn(&turn_id, TurnOutcome::CompletedFastPath, Some(reply), 0)
                     .await)
             }
             Intent::CapabilityQuestion => {
                 let reply = self.capability_answer();
-                self.emit(Event::MessageDelta {
-                    turn_id: turn_id.clone(),
-                    text: reply.clone(),
-                })
-                .await;
+                self.stream_paced(&turn_id, &reply).await;
                 Ok(self
                     .close_turn(&turn_id, TurnOutcome::CompletedFastPath, Some(reply), 0)
                     .await)
             }
             Intent::Task => self.agent_turn(input, &turn_id).await,
         }
+    }
+
+    /// Word-boundary paced streaming: emit the text as MessageDelta chunks so
+    /// the TUI visibly types it out. Bounded: a long answer never stalls the
+    /// turn loop (cap on chunk count), and cancel stops the reveal.
+    async fn stream_paced(&self, turn_id: &str, text: &str) {
+        const CHUNK_MIN_CHARS: usize = 18;
+        const PACE_MS: u64 = 14;
+        const MAX_CHUNKS: usize = 150;
+        let mut buf = String::new();
+        let mut chunks = 0usize;
+        for ch in text.chars() {
+            buf.push(ch);
+            let long_enough = buf.chars().count() >= CHUNK_MIN_CHARS;
+            if long_enough && (ch == ' ' || ch == '\n') {
+                self.emit(Event::MessageDelta {
+                    turn_id: turn_id.to_string(),
+                    text: buf.clone(),
+                })
+                .await;
+                buf.clear();
+                chunks += 1;
+                if chunks >= MAX_CHUNKS {
+                    continue; // drain the rest without pacing
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(PACE_MS)).await;
+                if self.cancel.load(Ordering::SeqCst) {
+                    return;
+                }
+            }
+        }
+        if !buf.is_empty() {
+            self.emit(Event::MessageDelta {
+                turn_id: turn_id.to_string(),
+                text: buf,
+            })
+            .await;
+        }
+    }
+
+    async fn narrate(&self, turn_id: &str, kind: NarrationKind, text: impl Into<String>) {
+        self.emit(Event::NarrationLine {
+            turn_id: turn_id.to_string(),
+            kind,
+            text: text.into(),
+        })
+        .await;
     }
 
     async fn close_turn(
@@ -228,8 +339,8 @@ impl Session {
         let cmd = input.trim();
         let text = match cmd {
             "/help" => Some(
-                "commands: /tools, /skills, /memory, /providers, /hooks, /quit — \
-                 anything else goes to the agent"
+                "commands: /tools, /skills, /memory, /providers, /mcp, /plugins, /hooks, \
+                 /theme <name>, /clear (tui), /quit — anything else goes to the agent"
                     .to_string(),
             ),
             "/tools" => Some(format!("tools: {}", self.registry.names().join(", "))),
@@ -250,6 +361,26 @@ impl Session {
                 "ladder: {}",
                 self.ladder.rung_summary().join(" | ")
             )),
+            "/mcp" => Some(if self.mcp_report.is_empty() {
+                "mcp: no servers configured ([mcp.servers] in .astrid/config.toml)".to_string()
+            } else {
+                format!(
+                    "mcp: {} client(s) live\n{}",
+                    self.mcp_clients.len(),
+                    self.mcp_report.join("\n")
+                )
+            }),
+            "/plugins" => {
+                let mut out = if self.plugin_names.is_empty() {
+                    "plugins: none loaded (plugins/<name>/plugin.toml)".to_string()
+                } else {
+                    format!("plugins: {}", self.plugin_names.join(", "))
+                };
+                for p in &self.plugin_problems {
+                    out.push_str(&format!("\nplugin problem: {p}"));
+                }
+                Some(out)
+            }
             "/hooks" => Some(if self.hooks.is_empty() {
                 "hooks: none registered (.astrid/hooks.toml)".to_string()
             } else {
@@ -277,7 +408,8 @@ impl Session {
     async fn agent_turn(&self, input: &str, turn_id: &str) -> astrid_core::Result<TurnReport> {
         let max_steps = self.cfg.max_turn_steps;
         let mut model_calls = 0usize;
-        let mut tools_used = false;
+        let mut tools_used = 0usize;
+        let mut streamed_deltas = false;
         let mut answer: Option<String> = None;
         let mut provider_seen: Option<String> = None;
         let mut ladder_slid = 0usize;
@@ -286,17 +418,28 @@ impl Session {
         let mut messages = vec![ChatMessage::user(input.to_string())];
         let tool_specs = self.tool_specs();
 
+        self.narrate(
+            turn_id,
+            NarrationKind::Ack,
+            format!("taking the task ({max_steps}-step budget)"),
+        )
+        .await;
+
         for step in 0..max_steps {
             if self.cancel.load(Ordering::SeqCst) {
                 outcome = TurnOutcome::Cancelled;
                 break;
             }
-            if step == 0 {
-                self.emit(Event::NarrationLine {
-                    turn_id: turn_id.to_string(),
-                    kind: NarrationKind::Ack,
-                    text: format!("taking the task ({max_steps} step budget)"),
-                })
+            if step > 0 {
+                let observations = messages.iter().filter(|m| m.role == Role::Tool).count();
+                self.narrate(
+                    turn_id,
+                    NarrationKind::Progress,
+                    format!(
+                        "step {}/{max_steps} — reasoning over {observations} tool result(s)",
+                        step + 1
+                    ),
+                )
                 .await;
             }
 
@@ -307,39 +450,105 @@ impl Session {
                 temperature: 0.2,
                 max_tokens: Some(2048),
             };
-            let LadderResult {
-                response,
+            let LadderStream {
+                mut rx,
                 provider_id,
                 ladder_slid: slid,
-                model_calls: calls,
                 ..
-            } = match self.ladder.chat(&req).await {
+            } = match self.ladder.chat_stream(&req).await {
                 Ok(r) => r,
                 Err(e) => {
+                    self.narrate(
+                        turn_id,
+                        NarrationKind::Decision,
+                        format!("turn failed: {e}"),
+                    )
+                    .await;
                     outcome = TurnOutcome::Failed(e.to_string());
                     break;
                 }
             };
-            model_calls += calls;
+            model_calls += 1;
             if provider_seen.is_none() {
                 provider_seen = Some(provider_id.clone());
                 ladder_slid = slid;
+                if slid > 0 {
+                    self.narrate(
+                        turn_id,
+                        NarrationKind::Decision,
+                        format!(
+                            "provider {provider_id} serving after {slid} skipped rung(s)"
+                        ),
+                    )
+                    .await;
+                }
             }
+
+            // consume the stream: deltas forward live, Final closes the call
+            let response = loop {
+                match rx.recv().await {
+                    Some(StreamItem::Delta(t)) => {
+                        streamed_deltas = true;
+                        self.emit(Event::MessageDelta {
+                            turn_id: turn_id.to_string(),
+                            text: t,
+                        })
+                        .await;
+                    }
+                    Some(StreamItem::Thinking(t)) => {
+                        self.emit(Event::ThinkingDelta {
+                            turn_id: turn_id.to_string(),
+                            text: t,
+                        })
+                        .await;
+                    }
+                    Some(StreamItem::Failed(e)) => {
+                        let msg = format!("stream failed: {e}");
+                        self.narrate(turn_id, NarrationKind::Decision, msg.clone())
+                            .await;
+                        outcome = TurnOutcome::Failed(msg);
+                        break None;
+                    }
+                    Some(StreamItem::Final(resp)) => break Some(resp),
+                    None => {
+                        let msg = "stream closed without a final response".to_string();
+                        self.narrate(turn_id, NarrationKind::Decision, msg.clone())
+                            .await;
+                        outcome = TurnOutcome::Failed(msg);
+                        break None;
+                    }
+                }
+            };
+            let Some(response) = response else {
+                break;
+            };
 
             if response.tool_calls.is_empty() {
                 answer = response.content.clone();
                 if let Some(a) = &answer {
-                    self.emit(Event::MessageDelta {
-                        turn_id: turn_id.to_string(),
-                        text: a.clone(),
-                    })
-                    .await;
+                    // Providers without SSE support (offline included) hand
+                    // over the full text at once; pace it so the transcript
+                    // still streams.
+                    if !streamed_deltas {
+                        self.stream_paced(turn_id, a).await;
+                    }
                 }
-                outcome = if tools_used {
+                outcome = if tools_used > 0 {
                     TurnOutcome::Completed
                 } else {
                     TurnOutcome::Unverified
                 };
+                if answer.is_some() {
+                    self.narrate(
+                        turn_id,
+                        NarrationKind::Completion,
+                        format!(
+                            "answered after {} model call(s), {tools_used} tool call(s)",
+                            model_calls
+                        ),
+                    )
+                    .await;
+                }
                 break;
             }
 
@@ -355,11 +564,11 @@ impl Session {
                 let args_value = match parsed_args {
                     Ok(v) => v,
                     Err(err) => {
-                        self.emit(Event::NarrationLine {
-                            turn_id: turn_id.to_string(),
-                            kind: NarrationKind::Decision,
-                            text: format!("malformed arguments for {name}: {err} — skipping"),
-                        })
+                        self.narrate(
+                            turn_id,
+                            NarrationKind::Decision,
+                            format!("malformed arguments for {name}: {err} — skipping"),
+                        )
                         .await;
                         messages.push(ChatMessage::tool_result(
                             call.id.clone(),
@@ -368,6 +577,15 @@ impl Session {
                         continue;
                     }
                 };
+                self.narrate(
+                    turn_id,
+                    NarrationKind::Decision,
+                    format!(
+                        "acting: {name}({})",
+                        truncate(&args_value.to_string(), 120)
+                    ),
+                )
+                .await;
                 let ctx = self.turn_ctx(turn_id);
                 match self
                     .registry
@@ -381,7 +599,7 @@ impl Session {
                     .await
                 {
                     Ok(out) => {
-                        tools_used = true;
+                        tools_used += 1;
                         messages.push(ChatMessage::tool_result(call.id.clone(), out.content));
                     }
                     Err(e) => {
@@ -397,6 +615,8 @@ impl Session {
                 }
             }
             if matches!(outcome, TurnOutcome::Cancelled) {
+                self.narrate(turn_id, NarrationKind::Progress, "cancelled by user")
+                    .await;
                 break;
             }
         }

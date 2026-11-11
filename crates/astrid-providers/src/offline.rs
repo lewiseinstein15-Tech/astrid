@@ -65,8 +65,42 @@ fn shell_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r#"(?is)^run (?:the )?(?:shell |command )+(.+?)\s*$"#).unwrap())
 }
 
+fn time_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)^\s*(?:what(?:'s| is)? )?(?:the )?(?:current )?time(?: is it| now)?\??\s*$"#)
+            .unwrap()
+    })
+}
+
+fn uuid_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)\b(?:generate|create|make|give me|new)\b.{0,20}\b(?:uuid|guid)\b|\b(?:uuid|guid)\b.{0,20}\b(?:generate|create|please)\b"#)
+            .unwrap()
+    })
+}
+
+/// Generic extension-tool invocation: `call the tool <name> [with {json}]` —
+/// works for MCP tools (`mcp_*`) and plugin tools (`plugin_*`) as well as any
+/// builtin, but only when the tool is actually offered (the menu never grows).
+fn call_tool_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?is)^call (?:the )?(?:mcp |plugin )?tool ([\w.:-]+)(?: with (.+))?\s*$"#)
+            .unwrap()
+    })
+}
+
+fn tool_matching<'a>(tools: &'a [crate::chat::ToolSpec], needle: &str) -> Option<&'a str> {
+    tools
+        .iter()
+        .map(|t| t.name.as_str())
+        .find(|n| n.contains(needle))
+}
+
 /// One deterministic plan step: (tool, args) — or None when no pattern
-/// matches or the target tool is not offered.
+/// matches or the target tool is not in the offered menu.
 fn plan(text: &str, tools: &[crate::chat::ToolSpec]) -> Option<ToolCall> {
     let offered = |name: &str| tools.iter().any(|t| t.name == name);
     let mk = |tool: &str, args: serde_json::Value| ToolCall {
@@ -111,6 +145,35 @@ fn plan(text: &str, tools: &[crate::chat::ToolSpec]) -> Option<ToolCall> {
     if let Some(c) = recall_re().captures(text) {
         return offered("mem_recall")
             .then(|| mk("mem_recall", serde_json::json!({"query": c[1].trim(), "k": 5})));
+    }
+    // Extension tools (MCP / plugins): capability-shaped phrases route to the
+    // first offered tool whose name carries the capability keyword.
+    if time_re().is_match(text) {
+        if let Some(name) = tool_matching(tools, "time") {
+            return Some(mk(name, serde_json::json!({})));
+        }
+    }
+    if uuid_re().is_match(text) {
+        if let Some(name) = tool_matching(tools, "uuid") {
+            return Some(mk(name, serde_json::json!({})));
+        }
+    }
+    if let Some(c) = call_tool_re().captures(text) {
+        let name = c[1].trim();
+        let args_raw = c.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+        if offered(name) {
+            let args: serde_json::Value = if args_raw.is_empty() {
+                serde_json::json!({})
+            } else {
+                match serde_json::from_str(args_raw) {
+                    Ok(v) => v,
+                    // Malformed JSON args are NOT a plan: fall through to the
+                    // honest fallback rather than guessing.
+                    Err(_) => return None,
+                }
+            };
+            return Some(mk(name, args));
+        }
     }
     None
 }
@@ -306,6 +369,79 @@ mod tests {
         let args: serde_json::Value =
             serde_json::from_str(&out.tool_calls[0].arguments_json).unwrap();
         assert_eq!(args["command"], "echo hi");
+    }
+
+    #[tokio::test]
+    async fn offline_routes_capability_phrases_to_extension_tools() {
+        // Time phrase → first offered tool whose name contains "time".
+        let out = OfflineProvider
+            .chat(&req_with_tools(
+                &["mcp_demo_time_now", "fs_read"],
+                "what time is it?",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(out.tool_calls[0].name, "mcp_demo_time_now");
+        assert_eq!(out.tool_calls[0].arguments_json, "{}");
+
+        // UUID phrase → offered uuid tool.
+        let out = OfflineProvider
+            .chat(&req_with_tools(
+                &["mcp_demo_new_uuid"],
+                "generate a uuid please",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(out.tool_calls[0].name, "mcp_demo_new_uuid");
+
+        // No matching tool offered → honest fallback, no invented call.
+        let out = OfflineProvider
+            .chat(&req_with_tools(&["fs_read"], "what time is it?"))
+            .await
+            .unwrap();
+        assert!(out.tool_calls.is_empty());
+        assert_eq!(out.finish_reason, "stop");
+    }
+
+    #[tokio::test]
+    async fn offline_generic_call_tool_pattern() {
+        // Explicit MCP tool call with JSON args.
+        let out = OfflineProvider
+            .chat(&req_with_tools(
+                &["mcp_demo_echo_back"],
+                r#"call the tool mcp_demo_echo_back with {"message":"hi there"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(out.tool_calls[0].name, "mcp_demo_echo_back");
+        let args: serde_json::Value =
+            serde_json::from_str(&out.tool_calls[0].arguments_json).unwrap();
+        assert_eq!(args["message"], "hi there");
+
+        // Plugin tool, no args.
+        let out = OfflineProvider
+            .chat(&req_with_tools(&["plugin_wordcount"], "call the tool plugin_wordcount"))
+            .await
+            .unwrap();
+        assert_eq!(out.tool_calls[0].name, "plugin_wordcount");
+        assert_eq!(out.tool_calls[0].arguments_json, "{}");
+
+        // Tool not offered → no call ever.
+        let out = OfflineProvider
+            .chat(&req_with_tools(&["fs_read"], "call the tool mcp_ghost_run"))
+            .await
+            .unwrap();
+        assert!(out.tool_calls.is_empty());
+
+        // Malformed JSON args → no call (honest fallback instead of guessing).
+        let out = OfflineProvider
+            .chat(&req_with_tools(
+                &["mcp_demo_echo_back"],
+                "call the tool mcp_demo_echo_back with {not json",
+            ))
+            .await
+            .unwrap();
+        assert!(out.tool_calls.is_empty());
     }
 
     #[tokio::test]

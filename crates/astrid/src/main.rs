@@ -42,14 +42,19 @@ enum Command {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
     let cli = Cli::parse();
+    // Tracing writes to stderr, which would corrupt the alternate-screen TUI.
+    // Headless modes only; in TUI mode tracing macros stay no-op and receipt
+    // events carry the story instead.
+    if cli.command.is_some() {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+            )
+            .with_writer(std::io::stderr)
+            .init();
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -119,6 +124,10 @@ async fn tui_main() -> Result<()> {
         memory_pages: session.memory.page_count(),
         data_dir: data_dir.display().to_string(),
         hook_count: session.hooks.specs.len(),
+        theme: session.cfg.tui.theme.clone(),
+        ladder_summary: session.ladder.rung_summary(),
+        mcp_lines: session.mcp_report.clone(),
+        plugin_count: session.plugin_names.len(),
     };
 
     let res = astrid_tui::run_app(rx, input_tx, bridge, cancel, status).await;

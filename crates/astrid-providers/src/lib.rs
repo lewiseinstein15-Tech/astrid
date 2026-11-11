@@ -5,8 +5,8 @@ pub mod ladder;
 pub mod offline;
 pub mod openai;
 
-pub use chat::{ChatMessage, ChatRequest, ChatResponse, Provider, Role, ToolCall, ToolSpec};
-pub use ladder::{AttemptRecord, LadderResult, ProviderLadder};
+pub use chat::{ChatMessage, ChatRequest, ChatResponse, Provider, Role, StreamItem, ToolCall, ToolSpec};
+pub use ladder::{AttemptRecord, LadderResult, LadderStream, ProviderLadder};
 pub use offline::OfflineProvider;
 pub use openai::OpenAICompatProvider;
 
@@ -139,6 +139,61 @@ pub(crate) mod test_support {
             let _ = stream.write_all(response.as_bytes()).await;
             let _ = stream.shutdown().await;
         });
+    }
+
+    pub(crate) async fn spawn_sse_mock(events: Vec<String>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let events = events.clone();
+                tokio::spawn(async move {
+                    let mut stream = stream;
+                    // Consume the request headers first: hyper reports a send
+                    // error if the server responds before draining the request.
+                    let mut seen: Vec<u8> = Vec::new();
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        let n = match tokio::time::timeout(
+                            Duration::from_secs(5),
+                            stream.read(&mut buf),
+                        )
+                        .await
+                        {
+                            Ok(Ok(n)) => n,
+                            _ => 0,
+                        };
+                        if n == 0 {
+                            break;
+                        }
+                        seen.extend_from_slice(&buf[..n]);
+                        if seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let _ = stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n",
+                        )
+                        .await;
+                    for ev in events {
+                        let body = format!("data: {ev}\n\n");
+                        let _ = stream
+                            .write_all(format!("{:x}\r\n{}\r\n", body.len(), body).as_bytes())
+                            .await;
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    let _ = stream.write_all(b"0\r\n\r\n").await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        format!("http://{addr}/v1")
     }
 
     fn find_headers_end(buf: &[u8]) -> Option<usize> {

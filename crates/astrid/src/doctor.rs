@@ -43,7 +43,41 @@ pub async fn run_doctor() -> Result<bool> {
 
             // tools
             let registry = astrid_tools::ToolRegistry::with_builtins();
-            println!("  ok     tools ({} registered)", registry.names().len());
+            println!("  ok     tools ({} builtin registered)", registry.names().len());
+
+            // plugins
+            let (plugins, plugin_problems) = astrid_tools::PluginTool::scan(&data_dir);
+            if plugin_problems.is_empty() {
+                println!("  ok     plugins ({} loaded)", plugins.len());
+            } else {
+                for p in &plugin_problems {
+                    println!("  warn   plugins: {p}");
+                }
+            }
+
+            // mcp servers: real handshake against each configured server
+            if !cfg.mcp.enabled || cfg.mcp.servers.is_empty() {
+                println!("  info   mcp (no servers configured)");
+            } else {
+                for s in &cfg.mcp.servers {
+                    if !s.enabled {
+                        println!("  info   mcp {}: disabled", s.name);
+                        continue;
+                    }
+                    match tokio::time::timeout(
+                        std::time::Duration::from_millis(cfg.mcp.timeout_ms.min(5_000)),
+                        astrid_mcp::connect_and_adapt(s, cfg.mcp.timeout_ms),
+                    )
+                    .await
+                    {
+                        Ok(Ok((_, adapters))) => {
+                            println!("  ok     mcp {} ({} tools)", s.name, adapters.len())
+                        }
+                        Ok(Err(e)) => problems.push(format!("mcp {}: {e}", s.name)),
+                        Err(_) => problems.push(format!("mcp {}: connect timed out", s.name)),
+                    }
+                }
+            }
 
             // skills + workforce
             match astrid_workforce::SkillIndex::load(Some(&data_dir.join("skills"))) {

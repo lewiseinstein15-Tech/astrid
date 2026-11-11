@@ -7,6 +7,7 @@ members = [
     "crates/astrid-providers",
     "crates/astrid-tools",
     "crates/astrid-tui",
+    "crates/astrid-mcp",
     "crates/astrid",
 ]
 
@@ -27,6 +28,7 @@ astrid-workforce = { path = "crates/astrid-workforce" }
 astrid-providers = { path = "crates/astrid-providers" }
 astrid-tools = { path = "crates/astrid-tools" }
 astrid-tui = { path = "crates/astrid-tui" }
+astrid-mcp = { path = "crates/astrid-mcp" }
 
 # async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "time", "sync", "io-util"] }
@@ -41,7 +43,10 @@ serde_json = "1"
 toml = "0.8"
 
 # HTTP (providers, web_fetch)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+# streaming
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 # errors & logging
 anyhow = "1"
