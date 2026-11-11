@@ -1,0 +1,53 @@
+{
+  "run_id": "eval_b37f0cd9bd2d4b4da17bc737e4e2c69b",
+  "provider": "see task notes",
+  "tasks": [
+    {
+      "id": "cap-tools",
+      "outcome": "completed-fast-path",
+      "passed": true,
+      "note": "answer matched",
+      "duration_ms": 2
+    },
+    {
+      "id": "cap-memory",
+      "outcome": "completed-fast-path",
+      "passed": true,
+      "note": "answer matched",
+      "duration_ms": 0
+    },
+    {
+      "id": "write-file",
+      "outcome": "completed",
+      "passed": true,
+      "note": "file artifact verified",
+      "duration_ms": 2
+    },
+    {
+      "id": "write-reversed",
+      "outcome": "completed",
+      "passed": true,
+      "note": "file artifact verified",
+      "duration_ms": 1
+    },
+    {
+      "id": "remember",
+      "outcome": "completed",
+      "passed": true,
+      "note": "mem_remember completed successfully",
+      "duration_ms": 2
+    },
+    {
+      "id": "shell-echo",
+      "outcome": "completed",
+      "passed": true,
+      "note": "shell_run completed successfully",
+      "duration_ms": 1
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "total": 6,
+    "rate": 1.0
+  }
+}

@@ -16,3 +16,4 @@ tokio = { workspace = true, features = ["net"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+regex = { workspace = true }

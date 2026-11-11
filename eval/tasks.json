@@ -1,0 +1,34 @@
+{
+  "tasks": [
+    {
+      "id": "cap-tools",
+      "task": "what tools do you have?",
+      "check": { "type": "answer_regex", "pattern": "fs_read" }
+    },
+    {
+      "id": "cap-memory",
+      "task": "how many memory pages do you keep?",
+      "check": { "type": "answer_regex", "pattern": "(?i)memory" }
+    },
+    {
+      "id": "write-file",
+      "task": "create a file named hello.txt containing 'hello from astrid'",
+      "check": { "type": "file_contains", "path": "hello.txt", "needle": "hello from astrid" }
+    },
+    {
+      "id": "write-reversed",
+      "task": "write \"the quick brown fox\" to the file out/fox.txt",
+      "check": { "type": "file_contains", "path": "out/fox.txt", "needle": "quick brown fox" }
+    },
+    {
+      "id": "remember",
+      "task": "remember that the release codename is Peregrine",
+      "check": { "type": "tool_used", "tool": "mem_remember" }
+    },
+    {
+      "id": "shell-echo",
+      "task": "run the shell command echo proof-of-honesty",
+      "check": { "type": "tool_used", "tool": "shell_run" }
+    }
+  ]
+}
