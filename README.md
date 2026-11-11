@@ -50,9 +50,12 @@ redesigned, and why — is [docs/PORT-MAP.md](docs/PORT-MAP.md).
   failures. See [docs/M6-WEB-AND-ANSWERS.md](docs/M6-WEB-AND-ANSWERS.md).
 * **Clean answers**: finished responses render as document-style blocks —
   headings, bullets, code, inline bold and links — instead of raw tool dumps.
-* **Three palettes**: `midnight`, `nordic`, `ember` — one hue per role
-  (user, assistant, narration kinds, tool families, approvals). `/theme
-  <name>` switches live.
+* **Seven palettes**: `midnight`, `nordic`, `ember`, `catppuccin`,
+  `tokyonight`, `rosepine`, `everforest` — one hue per role (user, assistant,
+  narration kinds, tool families, approvals), receipt hues pairwise-distinct
+  in every theme (test-enforced). `/theme <name>` switches live; the same
+  palette object drives the planned Android shell (M3 role mapping). Compare
+  them in [palette-demo.html](../astrid-demo/palette-demo.html).
 
 ## Crates
 

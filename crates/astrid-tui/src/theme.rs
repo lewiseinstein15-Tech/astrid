@@ -1,11 +1,15 @@
 //! Palettes for the Agent OS surface. Every role in the transcript owns a
 //! hue: user input, the assistant, each narration kind, every tool category
 //! (fs / shell / memory / skills / web / workforce / meta / mcp / plugin),
-//! approvals, refusals and status states. Three shipped themes:
+//! approvals, refusals and status states. Seven shipped themes:
 //!
-//! * `midnight` — GitHub-dark inspired, the default
-//! * `nordic`   — Nord palette, cool and calm
-//! * `ember`    — Gruvbox-inspired, warm and high-contrast
+//! * `midnight`   — GitHub-dark inspired, the default
+//! * `nordic`     — Nord palette, cool and calm
+//! * `ember`      — Gruvbox-inspired, warm and high-contrast
+//! * `catppuccin` — Catppuccin Mocha, soft pastels on deep slate
+//! * `tokyonight` — Tokyo Night, cool city-lights blues and purples
+//! * `rosepine`   — Rosé Pine, muted elegant dusk tones
+//! * `everforest` — Everforest, comfortable warm greens
 //!
 //! All colors are truecolor RGB; terminals without truecolor support see
 //! approximate ANSI fallbacks from ratatui.
@@ -195,13 +199,161 @@ pub const EMBER: Palette = Palette {
     status_approval: Color::Rgb(211, 134, 155),
 };
 
-pub const THEMES: [&str; 3] = ["midnight", "nordic", "ember"];
+pub const CATPPUCCIN: Palette = Palette {
+    name: "catppuccin",
+    // Catppuccin Mocha (base #1e1e2e): soft pastels, wide hue spread.
+    user: Color::Rgb(166, 227, 161),      // green
+    assistant: Color::Rgb(205, 214, 244), // text
+    ack: Color::Rgb(137, 180, 250),       // blue
+    progress: Color::Rgb(203, 166, 247),  // mauve
+    finding: Color::Rgb(148, 226, 213),   // teal
+    decision: Color::Rgb(250, 179, 135),  // peach
+    completion: Color::Rgb(166, 227, 161),
+    tool_fs: Color::Rgb(116, 199, 236),   // sapphire
+    tool_shell: Color::Rgb(250, 179, 135),// peach
+    tool_mem: Color::Rgb(245, 194, 231),  // pink
+    tool_skills: Color::Rgb(148, 226, 213),// teal
+    tool_web: Color::Rgb(137, 220, 235),  // sky
+    tool_agent: Color::Rgb(166, 227, 161),
+    tool_meta: Color::Rgb(108, 112, 134), // overlay0
+    tool_mcp: Color::Rgb(249, 226, 175),  // yellow
+    tool_plugin: Color::Rgb(242, 205, 205),// flamingo
+    ok: Color::Rgb(166, 227, 161),
+    fail: Color::Rgb(243, 139, 168),      // red
+    refused: Color::Rgb(249, 226, 175),
+    approval: Color::Rgb(203, 166, 247),
+    accent: Color::Rgb(203, 166, 247),
+    info: Color::Rgb(166, 173, 200),      // subtext0
+    dim: Color::Rgb(108, 112, 134),
+    border: Color::Rgb(49, 50, 68),       // surface0
+    border_focus: Color::Rgb(203, 166, 247),
+    status_ready: Color::Rgb(166, 227, 161),
+    status_work: Color::Rgb(137, 180, 250),
+    status_stream: Color::Rgb(137, 220, 235),
+    status_approval: Color::Rgb(203, 166, 247),
+};
+
+pub const TOKYONIGHT: Palette = Palette {
+    name: "tokyonight",
+    // Tokyo Night (bg #1a1b26): cool blues, neon accents.
+    user: Color::Rgb(158, 206, 106),      // green
+    assistant: Color::Rgb(192, 202, 245), // fg
+    ack: Color::Rgb(122, 162, 247),       // blue
+    progress: Color::Rgb(157, 124, 216),  // purple
+    finding: Color::Rgb(125, 207, 255),   // cyan
+    decision: Color::Rgb(255, 158, 100),  // orange
+    completion: Color::Rgb(158, 206, 106),
+    tool_fs: Color::Rgb(125, 207, 255),   // cyan
+    tool_shell: Color::Rgb(255, 158, 100),// orange
+    tool_mem: Color::Rgb(187, 154, 247),  // magenta
+    tool_skills: Color::Rgb(115, 218, 202),// teal
+    tool_web: Color::Rgb(42, 195, 222),   // teal-blue
+    tool_agent: Color::Rgb(158, 206, 106),
+    tool_meta: Color::Rgb(86, 95, 137),   // comment
+    tool_mcp: Color::Rgb(224, 175, 104),  // yellow
+    tool_plugin: Color::Rgb(247, 118, 142),// pink-red
+    ok: Color::Rgb(158, 206, 106),
+    fail: Color::Rgb(247, 118, 142),      // red
+    refused: Color::Rgb(224, 175, 104),
+    approval: Color::Rgb(187, 154, 247),
+    accent: Color::Rgb(122, 162, 247),
+    info: Color::Rgb(169, 177, 214),
+    dim: Color::Rgb(86, 95, 137),
+    border: Color::Rgb(41, 46, 66),       // bg3
+    border_focus: Color::Rgb(122, 162, 247),
+    status_ready: Color::Rgb(158, 206, 106),
+    status_work: Color::Rgb(122, 162, 247),
+    status_stream: Color::Rgb(125, 207, 255),
+    status_approval: Color::Rgb(187, 154, 247),
+};
+
+pub const ROSEPINE: Palette = Palette {
+    name: "rosepine",
+    // Rosé Pine (base #191724): muted dusk tones, gentle contrast.
+    user: Color::Rgb(156, 207, 216),      // foam
+    assistant: Color::Rgb(224, 222, 244), // text
+    ack: Color::Rgb(196, 167, 231),       // iris
+    progress: Color::Rgb(196, 167, 231),
+    finding: Color::Rgb(156, 207, 216),
+    decision: Color::Rgb(246, 193, 119),  // gold
+    completion: Color::Rgb(49, 116, 143), // pine
+    tool_fs: Color::Rgb(156, 207, 216),   // foam
+    tool_shell: Color::Rgb(235, 188, 186),// rose
+    tool_mem: Color::Rgb(235, 111, 146),  // love
+    tool_skills: Color::Rgb(49, 116, 143),// pine
+    tool_web: Color::Rgb(196, 167, 231),  // iris
+    tool_agent: Color::Rgb(156, 207, 216),
+    tool_meta: Color::Rgb(110, 106, 134), // muted
+    tool_mcp: Color::Rgb(246, 193, 119),  // gold
+    tool_plugin: Color::Rgb(196, 167, 231),// iris
+    ok: Color::Rgb(49, 116, 143),
+    fail: Color::Rgb(235, 111, 146),
+    refused: Color::Rgb(246, 193, 119),
+    approval: Color::Rgb(196, 167, 231),
+    accent: Color::Rgb(235, 188, 186),
+    info: Color::Rgb(144, 140, 170),      // subtle
+    dim: Color::Rgb(110, 106, 134),
+    border: Color::Rgb(38, 35, 58),       // overlay
+    border_focus: Color::Rgb(235, 188, 186),
+    status_ready: Color::Rgb(156, 207, 216),
+    status_work: Color::Rgb(235, 188, 186),
+    status_stream: Color::Rgb(196, 167, 231),
+    status_approval: Color::Rgb(196, 167, 231),
+};
+
+pub const EVERFOREST: Palette = Palette {
+    name: "everforest",
+    // Everforest dark (bg #2d353b): warm greens, comfortable contrast.
+    user: Color::Rgb(167, 192, 128),      // green
+    assistant: Color::Rgb(211, 198, 170), // fg
+    ack: Color::Rgb(127, 187, 179),       // blue
+    progress: Color::Rgb(214, 153, 182),  // purple
+    finding: Color::Rgb(131, 192, 146),   // aqua
+    decision: Color::Rgb(230, 152, 117),  // orange
+    completion: Color::Rgb(167, 192, 128),
+    tool_fs: Color::Rgb(127, 187, 179),   // blue
+    tool_shell: Color::Rgb(230, 152, 117),// orange
+    tool_mem: Color::Rgb(214, 153, 182),  // purple
+    tool_skills: Color::Rgb(131, 192, 146),// aqua
+    tool_web: Color::Rgb(131, 192, 146),
+    tool_agent: Color::Rgb(167, 192, 128),
+    tool_meta: Color::Rgb(133, 146, 137), // grey1
+    tool_mcp: Color::Rgb(219, 188, 127),  // yellow
+    tool_plugin: Color::Rgb(230, 126, 128),// red
+    ok: Color::Rgb(167, 192, 128),
+    fail: Color::Rgb(230, 126, 128),
+    refused: Color::Rgb(219, 188, 127),
+    approval: Color::Rgb(214, 153, 182),
+    accent: Color::Rgb(167, 192, 128),
+    info: Color::Rgb(157, 169, 160),      // grey2
+    dim: Color::Rgb(122, 132, 120),       // grey0
+    border: Color::Rgb(71, 82, 88),       // bg3
+    border_focus: Color::Rgb(167, 192, 128),
+    status_ready: Color::Rgb(167, 192, 128),
+    status_work: Color::Rgb(127, 187, 179),
+    status_stream: Color::Rgb(131, 192, 146),
+    status_approval: Color::Rgb(214, 153, 182),
+};
+
+pub const THEMES: [&str; 7] = [
+    "midnight",
+    "nordic",
+    "ember",
+    "catppuccin",
+    "tokyonight",
+    "rosepine",
+    "everforest",
+];
 
 /// Resolve a theme by name; unknown names fall back to `midnight`.
 pub fn by_name(name: &str) -> Palette {
     match name {
         "nordic" => NORDIC,
         "ember" => EMBER,
+        "catppuccin" => CATPPUCCIN,
+        "tokyonight" => TOKYONIGHT,
+        "rosepine" => ROSEPINE,
+        "everforest" => EVERFOREST,
         _ => MIDNIGHT,
     }
 }
@@ -212,10 +364,41 @@ mod tests {
 
     #[test]
     fn themes_resolve_and_unknown_falls_back() {
-        assert_eq!(by_name("nordic").name, "nordic");
-        assert_eq!(by_name("ember").name, "ember");
-        assert_eq!(by_name("midnight").name, "midnight");
+        for name in THEMES {
+            assert_eq!(by_name(name).name, name);
+        }
         assert_eq!(by_name("nope").name, "midnight");
+    }
+
+    #[test]
+    fn every_theme_keeps_receipt_hues_distinct() {
+        // The whole point: a receipt is recognizable by color alone, in every
+        // shipped theme.
+        let as_u32 = |c: Color| -> u32 {
+            match c {
+                Color::Rgb(r, g, b) => (r as u32) << 16 | (g as u32) << 8 | b as u32,
+                _ => 0,
+            }
+        };
+        for name in THEMES {
+            let p = by_name(name);
+            let core = [
+                p.tool_color("fs_read"),
+                p.tool_color("shell_run"),
+                p.tool_color("mem_recall"),
+                p.tool_color("mcp_demo_time"),
+                p.tool_color("plugin_greet"),
+            ];
+            for i in 0..core.len() {
+                for j in (i + 1)..core.len() {
+                    assert_ne!(
+                        as_u32(core[i]),
+                        as_u32(core[j]),
+                        "{name}: hues {i} and {j} collide"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
