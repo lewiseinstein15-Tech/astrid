@@ -5,3 +5,21 @@ Cargo.lock.orig
 .DS_Store
 .astrid/
 !docs/assets
+
+# --- crash dumps (never again in the repo) ---
+# A Rust toolchain process that dies writes a `core` dump into its CWD — the
+# repo root — because core_pattern=core and ulimit -c are unlimited in this
+# sandbox. Build scripts now run with `ulimit -c 0`; these patterns are the
+# second line of defense.
+/core
+core.*
+
+# --- Android build outputs (never in git, never in the zip) ---
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/jniLibs/
+android/app/src/test/natives/
+android/.idea/
+*.log

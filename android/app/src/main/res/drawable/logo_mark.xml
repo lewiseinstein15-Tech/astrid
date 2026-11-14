@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Astrid mark: 4-point star with orbit ring and orbit dot (20-logo-board).
+     Gradient simplified to the mid stop #FB923C at header size. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <group android:rotation="-30" android:pivotX="50" android:pivotY="50">
+        <path
+            android:pathData="M86,50 a36,13 0 1,0 -72,0 a36,13 0 1,0 72,0"
+            android:strokeColor="#FB923C"
+            android:strokeAlpha="0.7"
+            android:strokeWidth="2.5"
+            android:fillColor="#00000000" />
+    </group>
+    <path
+        android:pathData="M50,24 C53,41 59,47 76,50 C59,53 53,59 50,76 C47,59 41,53 24,50 C41,47 47,41 50,24 Z"
+        android:fillColor="#FB923C" />
+    <path
+        android:pathData="M81,32 m-4.5,0 a4.5,4.5 0 1,1 9,0 a4.5,4.5 0 1,1 -9,0"
+        android:fillColor="#FF8A7A" />
+</vector>

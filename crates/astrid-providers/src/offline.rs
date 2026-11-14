@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 /// What the offline agent says when the question is not about Astrid itself.
 const FALLBACK: &str = "You are talking to Astrid's offline agent (no model provider \
 configured). I can answer questions about my own tools, skills, memory, and configuration, \
-and execute approved tools. Configure a provider in .astrid/config.toml to unlock \
+and execute approved tools. Open Settings > Providers to unlock \
 model-backed answers.";
 
 const CAPABILITY_NOUNS: [&str; 5] = ["tool", "skill", "agent", "provider", "capability"];
@@ -431,7 +431,7 @@ impl Provider for OfflineProvider {
             resp.content = Some(format!(
                 "You are talking to Astrid's offline agent (no model provider configured). \
 My live tools are: {}.\nI can execute approved tools and answer questions about my own \
-capabilities from the registry. Configure a provider in .astrid/config.toml to unlock \
+capabilities from the registry. Open Settings > Providers to unlock \
 model-backed answers.",
                 names.join(", ")
             ));

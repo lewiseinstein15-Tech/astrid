@@ -9,6 +9,7 @@ members = [
     "crates/astrid-tui",
     "crates/astrid-mcp",
     "crates/astrid",
+    "crates/astrid-ffi",
 ]
 
 [workspace.package]

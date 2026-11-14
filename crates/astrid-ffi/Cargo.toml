@@ -1,0 +1,35 @@
+[package]
+name = "astrid-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "UniFFI bridge: the Astrid core (turn loop, memory, tools, receipts) exposed to the Android UI"
+
+build = "build.rs"
+
+[lib]
+name = "astrid_ffi"
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+uniffi = { version = "0.32", features = ["cli"] }
+rusqlite = { version = "0.42", features = ["bundled"] }
+# The Android UI drives the real core: the session turn loop, memory kernel,
+# roster and skills catalog come from the same crates the TUI ships.
+astrid = { path = "../astrid" }
+astrid-core = { workspace = true }
+astrid-memory = { workspace = true }
+astrid-workforce = { workspace = true }
+tokio = { workspace = true }
+sha2 = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
