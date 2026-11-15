@@ -488,7 +488,7 @@ class AstridUiTest {
     @Test
     fun versionIsIdenticalInApkCoreAndChatCard() {
         assertEquals(version, ai.astrid.app.BuildConfig.VERSION_NAME)
-        assertEquals(303, ai.astrid.app.BuildConfig.VERSION_CODE)
+        assertEquals(400, ai.astrid.app.BuildConfig.VERSION_CODE)
         startNewChatFromAttachMenu()
         compose.onNodeWithText("v$version").assertExists()
     }
@@ -499,6 +499,6 @@ class AstridUiTest {
         compose.onNodeWithTag("settings/about").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Astrid $version").assertIsDisplayed()
-        compose.onNodeWithText("versionCode 303 (phase × 100 + fix)").assertIsDisplayed()
+        compose.onNodeWithText("versionCode 400 (phase × 100 + fix)").assertIsDisplayed()
     }
 }
