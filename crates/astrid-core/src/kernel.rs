@@ -37,7 +37,7 @@ fn capability_re() -> &'static Regex {
 fn identity_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?i)\b(who|what)\s+(are|r)\s*(you|u)\b[\s?!.]*$|\byour\s+name\b[\s?!.]*$|\babout\s+(you|yourself)\b[\s?!.]*$|\bare\s+you\s+(an?|really)\s*(ai|agent|bot|llm|human|person)\b[\s?!.]*$|\bwho\s+(made|built|created|trained)\s+you\b[\s?!.]*$")
+        Regex::new(r"(?i)\b(who|what)\s+(are|r)\s*(you|u)\b[\s?!.]*$|\byour\s+name\b[\s?!.]*$|\babout\s+(you|yourself)\b[\s?!.]*$|\bare\s+you\s+(an?|really(\s+a)?|truly|actually)\s*(ai|agent|bot|llm|human|person|machine)\b[\s?!.]*$|\bwho\s+(made|built|created|trained)\s+you\b[\s?!.]*$")
             .unwrap()
     })
 }
