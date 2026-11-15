@@ -1,6 +1,7 @@
 package ai.astrid.app
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -51,7 +52,7 @@ class TurnServiceTest {
         assertEquals(NotificationManager.IMPORTANCE_LOW, channel.importance)
 
         // The foreground notification is named — nothing silent, ever.
-        val notification = shadowOf(service).latestNotification
+        val notification = shadowOf(service).lastForegroundNotification
         assertEquals("Astrid is working", notification.extras.getString(Notification.EXTRA_TITLE))
         assertEquals(
             "An agent turn is running in the foreground so it is not killed mid-task.",
@@ -67,6 +68,10 @@ class TurnServiceTest {
         val stopIntent = Intent(context, TurnService::class.java).setAction(TurnService.ACTION_STOP)
         service.onStartCommand(stopIntent, 0, 2)
         assertFalse("the stop action must demote the service", TurnService.active)
+        assertTrue(
+            "the stop action must call stopSelf",
+            shadowOf(service).isStoppedBySelf()
+        )
 
         // Teardown clears the flag too (restart-after-kill safety).
         service.onDestroy()
@@ -89,7 +94,10 @@ class TurnServiceTest {
         )
 
         // The honest subtype: what the service does, declared to Android.
-        val property = pm.getProperty("android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE", info)
+        val property = pm.getProperty(
+            "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE",
+            ComponentName(context, TurnService::class.java)
+        )
         assertNotNull("PROPERTY_SPECIAL_USE_FGS_SUBTYPE must be declared", property)
         assertEquals(TurnService.FGS_SUBTYPE, property!!.getString())
 

@@ -2993,6 +2993,13 @@ data class TurnReply (
     var `provider`: kotlin.String
     , 
     var `turnId`: kotlin.String
+    , 
+    /**
+     * Why the answer came from a non-first ladder rung (rung errors and
+     * skips, verbatim); null when the first rung served. Rendered as-is:
+     * the fallback is shown, never hidden.
+     */
+    var `fallbackReason`: kotlin.String?
     
 ){
     
@@ -3012,19 +3019,22 @@ public object FfiConverterTypeTurnReply: FfiConverterRustBuffer<TurnReply> {
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
     override fun allocationSize(value: TurnReply) = (
             FfiConverterString.allocationSize(value.`reply`) +
             FfiConverterString.allocationSize(value.`provider`) +
-            FfiConverterString.allocationSize(value.`turnId`)
+            FfiConverterString.allocationSize(value.`turnId`) +
+            FfiConverterOptionalString.allocationSize(value.`fallbackReason`)
     )
 
     override fun write(value: TurnReply, buf: ByteBuffer) {
             FfiConverterString.write(value.`reply`, buf)
             FfiConverterString.write(value.`provider`, buf)
             FfiConverterString.write(value.`turnId`, buf)
+            FfiConverterOptionalString.write(value.`fallbackReason`, buf)
     }
 }
 
