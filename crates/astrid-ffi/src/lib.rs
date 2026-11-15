@@ -108,6 +108,10 @@ pub struct TurnReply {
     pub reply: String,
     pub provider: String,
     pub turn_id: String,
+    /// Why the answer came from a non-first ladder rung (rung errors and
+    /// skips, verbatim); null when the first rung served. Rendered as-is:
+    /// the fallback is shown, never hidden.
+    pub fallback_reason: Option<String>,
 }
 
 /// The embedded core: a tokio runtime plus the real session turn loop.
@@ -391,18 +395,24 @@ impl Bridge {
         let user = map_store(s.insert_message(session_id, "user", &text, ""))?;
         map_store(s.link_message_files(user.id, &upload_ids))?;
 
-        let (answer, provider, turn_id) = self.core_call(|core| {
+        let (answer, provider, turn_id, fallback_reason) = self.core_call(|core| {
             let report: TurnReport = core
                 .rt
                 .block_on(core.session.turn(&text))
                 .map_err(|e| BridgeError::Io { msg: e.to_string() })?;
-            Ok((report.answer.unwrap_or_default(), report.provider, report.turn_id))
+            Ok((
+                report.answer.unwrap_or_default(),
+                report.provider,
+                report.turn_id,
+                report.fallback_reason,
+            ))
         })??;
         map_store(s.insert_message(session_id, "assistant", &answer, &provider))?;
         Ok(TurnReply {
             reply: answer,
             provider,
             turn_id,
+            fallback_reason,
         })
     }
 

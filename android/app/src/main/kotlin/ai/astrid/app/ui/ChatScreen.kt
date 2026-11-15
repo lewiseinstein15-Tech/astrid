@@ -45,6 +45,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ai.astrid.app.R
+import ai.astrid.app.TurnService
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.delay
@@ -125,6 +126,15 @@ fun ChatScreen(
     var events by remember { mutableStateOf(listOf<EventRecord>()) }
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
     var composerText by remember { mutableStateOf("") }
+    // Phase 4: honest fallback receipt — why a non-first ladder rung served
+    // the last turn (null when the first rung served).
+    var fallbackReason by remember { mutableStateOf<String?>(null) }
+    // Phase 4: long turns promote to a foreground service. The rationale is
+    // asked once per session; a decline means never promote this session.
+    var rationaleAsked by remember { mutableStateOf(false) }
+    var rationaleAccepted by remember { mutableStateOf(false) }
+    var servicePromoted by remember { mutableStateOf(false) }
+    var showTurnRationale by remember { mutableStateOf(false) }
 
     // Reload whenever a new chat starts or a session is opened.
     LaunchedEffect(chatEpoch) {
@@ -138,6 +148,10 @@ fun ChatScreen(
         sending = true
         val paths = attachments.map { it.path }
         runCatching { bridge.sendMessageWithFiles(text, paths) }
+            .onSuccess { reply ->
+                // Phase 4: keep the honest fallback receipt from the reply.
+                fallbackReason = reply.fallbackReason
+            }
             .onFailure { e ->
                 runCatching { bridge.appendEvent("chat.error", "${e::class.simpleName}: ${e.message}") }
             }
@@ -151,6 +165,28 @@ fun ChatScreen(
         while (true) {
             delay(2000)
             events = runCatching { bridge.recentEvents(60u) }.getOrDefault(events)
+        }
+    }
+
+    // Phase 4: a turn still working after the promote delay moves to the
+    // foreground service so Android cannot kill it mid-task. Short turns —
+    // and every test turn — finish before the delay fires and stay background.
+    LaunchedEffect(sending) {
+        if (!sending) {
+            if (servicePromoted) {
+                TurnService.stop(context)
+                servicePromoted = false
+            }
+            return@LaunchedEffect
+        }
+        delay(TurnService.PROMOTE_DELAY_MS)
+        if (!sending) return@LaunchedEffect
+        when {
+            !rationaleAsked -> showTurnRationale = true
+            rationaleAccepted -> {
+                TurnService.start(context)
+                servicePromoted = true
+            }
         }
     }
 
@@ -243,6 +279,19 @@ fun ChatScreen(
                 }
             }
             item { Spacer(Modifier.height(4.dp)) }
+        }
+
+        // Phase 4: honest fallback receipt — why a non-first ladder rung
+        // served the last turn. Shown under the transcript, muted, verbatim.
+        fallbackReason?.let { reason ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .testTag("receipt/fallback")
+            ) {
+                KitText("fallback: $reason", TextMuted, 11, FontWeight.Medium)
+            }
         }
 
         // Composer card (01-chat): input on top; +, model chip, send right.
@@ -349,6 +398,27 @@ fun ChatScreen(
             onUploadFile = { filePicker.launch("*/*") },
             onTakePhoto = { takePhoto() },
             onClose = { attachOpen = false }
+        )
+    }
+
+    if (showTurnRationale) {
+        TurnRationaleDialog(
+            onAccept = {
+                showTurnRationale = false
+                rationaleAsked = true
+                rationaleAccepted = true
+                // The turn that triggered the dialog is usually still running;
+                // promote now. Later turns promote without asking again.
+                if (sending) {
+                    TurnService.start(context)
+                    servicePromoted = true
+                }
+            },
+            onDecline = {
+                showTurnRationale = false
+                rationaleAsked = true
+                rationaleAccepted = false
+            }
         )
     }
 }

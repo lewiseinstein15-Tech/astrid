@@ -3,8 +3,8 @@
 
 use crate::eventlog::EventPump;
 use astrid_core::{
-    capability_reply, classify, new_id, now_iso, small_talk_reply, Event, HookRegistry, Intent,
-    NarrationKind, Profile, TurnOutcome,
+    capability_reply, classify, identity_reply, new_id, now_iso, small_talk_reply, Event,
+    HookRegistry, Intent, NarrationKind, Profile, TurnOutcome,
 };
 use astrid_mcp::McpClient;
 use astrid_memory::MemoryKernel;
@@ -25,6 +25,10 @@ pub struct TurnReport {
     pub provider: String,
     pub ladder_slid: usize,
     pub model_calls: usize,
+    /// Why the answer came from a non-first ladder rung (rung errors and
+    /// skips, verbatim). `None` when the first rung served. The UI shows
+    /// this honestly instead of hiding the slide.
+    pub fallback_reason: Option<String>,
 }
 
 /// Headless approval policy (TUI mode uses the live bridge instead).
@@ -244,6 +248,17 @@ impl Session {
                     .close_turn(&turn_id, TurnOutcome::CompletedFastPath, Some(reply), 0)
                     .await)
             }
+            Intent::Identity => {
+                // Identity costs zero model calls: the agent says who it is
+                // from live state, never by "thinking".
+                let reply = identity_reply("Astrid", &self.provider_desc);
+                self.narrate(&turn_id, NarrationKind::Ack, "identity question — answering from live state")
+                    .await;
+                self.stream_paced(&turn_id, &reply).await;
+                Ok(self
+                    .close_turn(&turn_id, TurnOutcome::CompletedFastPath, Some(reply), 0)
+                    .await)
+            }
             Intent::Task => self.agent_turn(input, &turn_id).await,
         }
     }
@@ -318,6 +333,7 @@ impl Session {
             provider,
             ladder_slid: 0,
             model_calls,
+            fallback_reason: None,
         }
     }
 
@@ -413,6 +429,7 @@ impl Session {
         let mut answer: Option<String> = None;
         let mut provider_seen: Option<String> = None;
         let mut ladder_slid = 0usize;
+        let mut fallback_reason: Option<String> = None;
         let mut outcome = TurnOutcome::Unverified;
 
         let mut messages = vec![ChatMessage::user(input.to_string())];
@@ -454,6 +471,7 @@ impl Session {
                 mut rx,
                 provider_id,
                 ladder_slid: slid,
+                attempts,
                 ..
             } = match self.ladder.chat_stream(&req).await {
                 Ok(r) => r,
@@ -472,6 +490,25 @@ impl Session {
             if provider_seen.is_none() {
                 provider_seen = Some(provider_id.clone());
                 ladder_slid = slid;
+                // Rung errors are narrated, never silent: every rung that was
+                // skipped or attempted-and-failed before the winner served.
+                let mut slide_notes: Vec<String> = Vec::new();
+                for att in &attempts {
+                    if let Some(err) = &att.error {
+                        slide_notes.push(format!("{} failed ({err})", att.provider));
+                        self.narrate(
+                            turn_id,
+                            NarrationKind::Decision,
+                            format!(
+                                "rung {} failed: {err} — sliding to {provider_id}",
+                                att.provider
+                            ),
+                        )
+                        .await;
+                    } else if let Some(reason) = &att.skipped_reason {
+                        slide_notes.push(format!("{} skipped ({reason})", att.provider));
+                    }
+                }
                 if slid > 0 {
                     self.narrate(
                         turn_id,
@@ -481,6 +518,10 @@ impl Session {
                         ),
                     )
                     .await;
+                    fallback_reason = Some(format!(
+                        "served by {provider_id} after: {}",
+                        slide_notes.join("; ")
+                    ));
                 }
             }
 
@@ -641,6 +682,7 @@ impl Session {
             provider,
             ladder_slid,
             model_calls,
+            fallback_reason,
         })
     }
 

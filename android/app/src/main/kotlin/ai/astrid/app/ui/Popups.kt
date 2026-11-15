@@ -30,6 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ai.astrid.app.R
+import ai.astrid.app.TurnService
 import uniffi.astrid_ffi.Bridge
 
 /**
@@ -233,6 +234,49 @@ fun ModelPickerSheet(
                 }
             }
             OutlineButton("Open Settings > Providers", AccentSlate, tag = "provider/manage", onClick = onManageProviders)
+        }
+    }
+}
+
+/**
+ * Phase 4 — foreground-service rationale, shown once before the first
+ * promotion of a long turn. Same panel idiom as the picker sheet, centered:
+ * the copy is TurnService.rationaleText() (the same words the notification
+ * uses — nothing the dialog says differs from what the service does).
+ * Accept → this and future long turns may promote; Decline → no promotion
+ * for this session.
+ */
+@Composable
+fun TurnRationaleDialog(onAccept: () -> Unit, onDecline: () -> Unit) {
+    val panelClicks = blockClicks()
+    Box(
+        Modifier.fillMaxSize().clickable(onClick = onDecline).background(scrimMedium),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Surface)
+                .border(1.dp, Line)
+                .then(panelClicks)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                KitText("About notifications", TextPrimary, 18, FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Box(
+                    Modifier.size(44.dp).clickable(onClick = onDecline),
+                    contentAlignment = Alignment.Center
+                ) { IconClose() }
+            }
+            KitText(TurnService.rationaleText(), TextMuted, 14, FontWeight.Medium)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlineButton("Decline", AccentSlate, tag = "rationale/decline", onClick = onDecline)
+                OutlineButton("Got it", AccentOrange, tag = "rationale/accept", onClick = onAccept)
+            }
         }
     }
 }

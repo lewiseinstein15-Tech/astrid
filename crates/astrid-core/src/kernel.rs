@@ -11,6 +11,9 @@ pub enum Intent {
     SmallTalk,
     /// Questions about Astrid's own capabilities — answered from live state.
     CapabilityQuestion,
+    /// "Who are you" — identity answered from live state, never a model call:
+    /// an agent must be able to say who it is without pretending to think.
+    Identity,
     /// Real work — goes to the agent turn loop.
     Task,
 }
@@ -31,7 +34,17 @@ fn capability_re() -> &'static Regex {
     })
 }
 
-/// Classify user input. Order matters: small talk first, capability second.
+fn identity_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)\b(who|what)\s+(are|r)\s*(you|u)\b[\s?!.]*$|\byour\s+name\b[\s?!.]*$|\babout\s+(you|yourself)\b[\s?!.]*$|\bare\s+you\s+(an?|really)\s*(ai|agent|bot|llm|human|person)\b[\s?!.]*$|\bwho\s+(made|built|created|trained)\s+you\b[\s?!.]*$")
+            .unwrap()
+    })
+}
+
+/// Classify user input. Order matters: small talk first, capability second,
+/// identity third (after capability so "what tools do you have" stays in the
+/// capability lane), everything else is work.
 pub fn classify(input: &str) -> Intent {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -42,6 +55,9 @@ pub fn classify(input: &str) -> Intent {
     }
     if capability_re().is_match(trimmed) {
         return Intent::CapabilityQuestion;
+    }
+    if identity_re().is_match(trimmed) {
+        return Intent::Identity;
     }
     Intent::Task
 }
@@ -58,6 +74,19 @@ pub fn small_talk_reply(input: &str) -> String {
             "Hello. I'm Astrid — ready for a task. Ask me what I can do, or hand me real work."
         )
     }
+}
+
+/// Deterministic identity answer built from live state handed in by the
+/// caller — the same honesty rule as [`capability_reply`]: no hardcoded
+/// claims about providers or counts that can drift from the registry.
+pub fn identity_reply(name: &str, provider_desc: &str) -> String {
+    format!(
+        "I'm {name} — an agent, not a person. The core you're talking to is a \
+         local Rust kernel: an event log, a permission gate and a tool registry \
+         behind a UniFFI bridge. Right now my provider ladder is {provider_desc}; \
+         every answer I give is receipted, and every tool call is gated. Hand me \
+         real work and you'll see the plan, the receipts and the check."
+    )
 }
 
 /// Capability answer built ONLY from live state handed in by the caller —
@@ -102,5 +131,32 @@ mod tests {
         // Task-looking input must never land in the lean lanes.
         assert_eq!(classify("fix the bug in main.rs then run tests"), Intent::Task);
         assert_eq!(classify("what is the capital of Kenya"), Intent::Task);
+    }
+
+    #[test]
+    fn identity_routes_correctly() {
+        assert_eq!(classify("who are you?"), Intent::Identity);
+        assert_eq!(classify("what are you"), Intent::Identity);
+        assert_eq!(classify("What R U"), Intent::Identity);
+        assert_eq!(classify("what's your name"), Intent::Identity);
+        assert_eq!(classify("tell me about yourself"), Intent::Identity);
+        assert_eq!(classify("are you an AI?"), Intent::Identity);
+        assert_eq!(classify("are you really a person"), Intent::Identity);
+        assert_eq!(classify("who built you"), Intent::Identity);
+        // Capability questions keep their lane; work stays work.
+        assert_eq!(classify("who are the band members of you and i"), Intent::Task);
+        assert_eq!(classify("what are you building"), Intent::Task);
+    }
+
+    #[test]
+    fn identity_reply_names_the_agent_and_ladder() {
+        let reply = identity_reply("Astrid", "kilo-free, then the offline agent");
+        assert!(reply.contains("I'm Astrid"));
+        assert!(reply.contains("not a person"));
+        assert!(reply.contains("kilo-free, then the offline agent"));
+        assert!(reply.contains("gate"));
+        // The identity lane costs zero model calls by construction: it is a
+        // pure function of the handed-in state.
+        assert!(reply.len() > 80);
     }
 }

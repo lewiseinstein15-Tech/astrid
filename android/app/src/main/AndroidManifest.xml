@@ -6,6 +6,13 @@
         <package android:name="com.whatsapp" />
     </queries>
 
+    <!-- Long agent turns promote to a foreground service so Android cannot
+         kill the app mid-task (Phase 4). specialUse is declared honestly:
+         an agent turn is not media / transfer / call — see TurnService. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="Astrid"
         android:icon="@mipmap/ic_launcher"
@@ -34,5 +41,16 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Promoted long turns: one persistent notification, named, and
+             explained to the user before the first promotion. -->
+        <service
+            android:name=".TurnService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="long-running agent turns" />
+        </service>
     </application>
 </manifest>

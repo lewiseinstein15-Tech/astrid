@@ -20,7 +20,7 @@ pub use events::{
 };
 pub use hooks::{run_hook, HookDecision, HookEvent, HookRegistry, HookSpec, HOOK_EVENT_COUNT};
 pub use ids::{new_id, now_iso};
-pub use kernel::{capability_reply, classify, small_talk_reply, Intent};
+pub use kernel::{capability_reply, classify, identity_reply, small_talk_reply, Intent};
 
 /// Protocol version of the receipt/event taxonomy (see docs/PROTOCOLS.md).
 pub const EVENT_TAXONOMY_VERSION: &str = "1.0";

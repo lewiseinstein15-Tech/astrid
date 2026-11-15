@@ -14,6 +14,19 @@ pub enum GateDecision {
     Deny(String),
 }
 
+impl GateDecision {
+    /// Human label for receipts and the UI. A gate decision that reaches the
+    /// user must never arrive as a bare enum: "denied" is honest, a silent
+    /// drop is not.
+    pub fn label(&self) -> &'static str {
+        match self {
+            GateDecision::Allow => "allowed",
+            GateDecision::Ask => "ask first",
+            GateDecision::Deny(_) => "denied",
+        }
+    }
+}
+
 /// Profile × risk ladder. `readonly` runs Safe tools only; `auto` (default)
 /// runs Safe and Medium and asks for High/External; `full` runs everything
 /// (developer profile, warned about at startup — the note is logged here).
@@ -236,6 +249,16 @@ mod tests {
         assert_eq!(
             RiskGuard::refine("mem_recall", &json!({ "query": "x" })),
             GateDecision::Allow
+        );
+    }
+
+    #[test]
+    fn gate_decisions_carry_human_labels() {
+        assert_eq!(GateDecision::Allow.label(), "allowed");
+        assert_eq!(GateDecision::Ask.label(), "ask first");
+        assert_eq!(
+            GateDecision::Deny("system dir".to_string()).label(),
+            "denied"
         );
     }
 }

@@ -236,12 +236,14 @@ impl ToolRegistry {
         .await;
 
         // 3. RiskGuard: refuse on the ACTUAL args (rm -rf, /etc writes, …).
-        if let GateDecision::Deny(reason) = RiskGuard::refine(name, &args) {
+        let risk_decision = RiskGuard::refine(name, &args);
+        if let GateDecision::Deny(reason) = &risk_decision {
             tracing::warn!(tool = name, %reason, "risk guard refused tool args");
-            emit_refused(ctx, &call_id, name, &reason).await;
+            let labeled = format!("[gate: {}] {reason}", risk_decision.label());
+            emit_refused(ctx, &call_id, name, &labeled).await;
             return Err(Error::ToolRefused {
                 tool: name.to_string(),
-                reason,
+                reason: labeled,
             });
         }
 
@@ -279,13 +281,15 @@ impl ToolRegistry {
         }
 
         // 5. Permission gate: deny → refused; ask → approval sink.
-        match self.gate.decision(risk) {
+        let gate_decision = self.gate.decision(risk);
+        match &gate_decision {
             GateDecision::Deny(reason) => {
                 tracing::info!(tool = name, %reason, "permission gate denied tool");
-                emit_refused(ctx, &call_id, name, &reason).await;
+                let labeled = format!("[gate: {}] {reason}", gate_decision.label());
+                emit_refused(ctx, &call_id, name, &labeled).await;
                 return Err(Error::ToolRefused {
                     tool: name.to_string(),
-                    reason,
+                    reason: labeled,
                 });
             }
             GateDecision::Ask => {
