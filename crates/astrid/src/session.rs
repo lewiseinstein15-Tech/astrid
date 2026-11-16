@@ -317,7 +317,10 @@ impl Session {
         answer: Option<String>,
         model_calls: usize,
     ) -> TurnReport {
-        let provider = self.provider_desc.clone();
+        // Fast-path lanes (small talk, capability, identity, slash commands)
+        // never call a model — the receipt says so instead of borrowing the
+        // ladder's provider description.
+        let provider = "local (no model)".to_string();
         self.emit(Event::TurnCompleted {
             turn_id: turn_id.to_string(),
             outcome: outcome.clone(),

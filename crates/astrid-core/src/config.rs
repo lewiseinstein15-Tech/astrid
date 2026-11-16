@@ -50,7 +50,12 @@ impl Default for ProviderConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Built-in keyless rung ids, in default try-order. Canonically defined here
+/// (the config crate cannot depend on providers); astrid-providers::builtin
+/// mirrors this list and its tests assert the two never drift apart.
+pub const BUILTIN_LADDER: [&str; 2] = ["kilo-auto/free", "pollinations"];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProvidersConfig {
     /// Provider ids in try-order. The offline provider is implicit and last.
@@ -59,6 +64,22 @@ pub struct ProvidersConfig {
     pub local_only: bool,
     /// Per-provider settings keyed by provider id.
     pub providers: BTreeMap<String, ProviderConfig>,
+}
+
+impl Default for ProvidersConfig {
+    /// A fresh install gets the two built-in keyless rungs first (proven
+    /// endpoints — see astrid-providers/src/builtin.rs), the user's own
+    /// providers after, and the offline agent is implicit and last.
+    fn default() -> Self {
+        Self {
+            ladder: BUILTIN_LADDER
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
+            local_only: false,
+            providers: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -51,12 +51,19 @@ class BridgeJvmTest {
                 dbPath = dir.resolve("astrid.db").absolutePath,
                 dataDir = dir.resolve("core").absolutePath,
             )
+            // Hermetic: the built-in keyless rungs are real network endpoints;
+            // a JVM unit test must answer from the local kernel, never the net.
+            bridge.setLadder(listOf("offline"))
             val reply = bridge.sendMessage("hi")
             assertTrue(
                 reply.reply.contains("Astrid"),
                 "the kernel gate must answer small talk from the core, got: ${reply.reply}"
             )
-            assertTrue(reply.provider.startsWith("offline"), "no provider configured on the host")
+            assertEquals(
+                "local (no model)",
+                reply.provider,
+                "small talk is answered by the kernel gate, never by a provider"
+            )
 
             val messages = bridge.recentMessages(10u)
             assertEquals(2, messages.size, "user + assistant persisted")
@@ -78,6 +85,8 @@ class BridgeJvmTest {
                 dbPath = dir.resolve("astrid.db").absolutePath,
                 dataDir = dir.resolve("core").absolutePath,
             )
+            // Hermetic: "see attached" is a Task — keep the ladder offline.
+            bridge.setLadder(listOf("offline"))
             val src = dir.resolve("brief.md")
             src.writeText("attachment body\n")
             val path = src.absolutePath

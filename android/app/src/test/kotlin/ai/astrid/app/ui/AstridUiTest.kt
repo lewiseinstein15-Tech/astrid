@@ -23,6 +23,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Before
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
@@ -47,7 +48,23 @@ class AstridUiTest {
     private val version: String =
         requireNotNull(System.getProperty("astrid.version")) { "astrid.version property not set" }
 
+    /** versionCode = phase*100 + fix, computed — never hardcoded per release. */
+    private val expectedVersionCode: Int =
+        version.split('.').let { p ->
+            (p.getOrNull(2)?.toInt() ?: 0) * 100 + (p.getOrNull(3)?.toInt() ?: 0)
+        }
+
     private val bridge get() = AstridBridge.bridge
+
+    /**
+     * Hermetic ladder: the built-in keyless rungs are REAL network endpoints
+     * (kilo-auto/free, Pollinations). UI tests answer from the offline agent,
+     * never the internet.
+     */
+    @Before
+    fun hermeticLadder() {
+        runCatching { bridge.setLadder(listOf("offline")) }
+    }
 
     private fun openDrawer() {
         compose.onNodeWithTag("header/menu").performClick()
@@ -488,7 +505,7 @@ class AstridUiTest {
     @Test
     fun versionIsIdenticalInApkCoreAndChatCard() {
         assertEquals(version, ai.astrid.app.BuildConfig.VERSION_NAME)
-        assertEquals(400, ai.astrid.app.BuildConfig.VERSION_CODE)
+        assertEquals(expectedVersionCode, ai.astrid.app.BuildConfig.VERSION_CODE)
         startNewChatFromAttachMenu()
         compose.onNodeWithText("v$version").assertExists()
     }
@@ -499,6 +516,6 @@ class AstridUiTest {
         compose.onNodeWithTag("settings/about").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Astrid $version").assertIsDisplayed()
-        compose.onNodeWithText("versionCode 400 (phase × 100 + fix)").assertIsDisplayed()
+        compose.onNodeWithText("versionCode $expectedVersionCode (phase × 100 + fix)").assertIsDisplayed()
     }
 }

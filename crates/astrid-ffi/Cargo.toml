@@ -22,6 +22,11 @@ astrid = { path = "../astrid" }
 astrid-core = { workspace = true }
 astrid-memory = { workspace = true }
 astrid-workforce = { workspace = true }
+# Built-in rung ids + the per-rung network self-test endpoints.
+astrid-providers = { path = "../astrid-providers" }
+# net_selftest (Settings > Providers > Test) makes its own reqwest calls
+# with the same rustls+webpki-roots TLS as the providers.
+reqwest = { workspace = true }
 tokio = { workspace = true }
 sha2 = { workspace = true }
 serde_json = { workspace = true }

@@ -21,8 +21,10 @@ use astrid_core::config::{AstridConfig, Profile, ProviderConfig, ProvidersConfig
 use astrid_core::events::{Event, NarrationKind, TurnOutcome};
 use astrid_memory::protocol::PageSummary;
 use sha2::{Digest, Sha256};
+use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use store::{Store, now_ms};
 use uniffi::Record;
 
@@ -112,6 +114,37 @@ pub struct TurnReply {
     /// skips, verbatim); null when the first rung served. Rendered as-is:
     /// the fallback is shown, never hidden.
     pub fallback_reason: Option<String>,
+}
+
+/// One rung of the effective ladder, in try-order. The offline rung is
+/// always present as the last row (it is implicit in the Rust ladder).
+#[derive(Debug, Clone, Record)]
+pub struct LadderRungRecord {
+    pub id: String,
+    /// One line of plain language: what this rung is.
+    pub desc: String,
+    /// True for the built-in keyless lanes (kilo-auto/free, pollinations).
+    pub builtin: bool,
+}
+
+/// One check of the network self-test (Settings > Providers > Test).
+#[derive(Debug, Clone, Record)]
+pub struct NetSelfTestCheck {
+    /// "dns" | "https" | "chat"
+    pub name: String,
+    pub ok: bool,
+    /// Human-readable result: the status line, the first 200 chars of the
+    /// body, or the RAW error chain — errors are surfaced, never swallowed.
+    pub detail: String,
+    /// Wall-clock milliseconds this check took.
+    pub ms: u64,
+}
+
+/// The whole per-rung network self-test report.
+#[derive(Debug, Clone, Record)]
+pub struct NetSelfTestReport {
+    pub rung: String,
+    pub checks: Vec<NetSelfTestCheck>,
 }
 
 /// The embedded core: a tokio runtime plus the real session turn loop.
@@ -230,6 +263,74 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 const PROVIDER_KV: &str = "provider.cfg";
 const ACTIVE_SESSION_KV: &str = "chat.active_session";
+const LADDER_KV: &str = "ladder.order";
+
+/// The effective ladder order: the saved order (Settings > Providers reorder)
+/// wins; otherwise the built-in keyless rungs first, then the user's rung.
+/// The offline rung is stripped — from_config re-appends it, always last.
+fn ladder_order(saved: Option<Vec<String>>, custom: Option<String>) -> Vec<String> {
+    let mut ladder = match saved {
+        Some(v) if !v.is_empty() => v,
+        _ => astrid_providers::BUILTIN_IDS
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+    };
+    ladder.retain(|id| id != "offline");
+    if let Some(c) = custom {
+        if !ladder.iter().any(|id| id == &c) {
+            ladder.push(c);
+        }
+    }
+    ladder
+}
+
+/// Full error chain of any error, joined with ": " — a reqwest TLS or DNS
+/// failure is worthless as "request failed"; the chain names the real cause.
+fn err_chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut s = e.to_string();
+    let mut src = e.source();
+    while let Some(err) = src {
+        s.push_str(": ");
+        s.push_str(&err.to_string());
+        src = err.source();
+    }
+    s
+}
+
+/// Host (and port) of a base_url. Returns (host, port) with the scheme
+/// default applied when the authority carries no explicit port.
+fn host_of(base_url: &str) -> (String, u16) {
+    let rest = base_url
+        .strip_prefix("https://")
+        .or_else(|| base_url.strip_prefix("http://"))
+        .unwrap_or(base_url);
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let default_port = if base_url.starts_with("https") { 443 } else { 80 };
+    match authority.rsplit_once(':') {
+        Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) && !p.is_empty() => {
+            (h.trim_matches(['[', ']']).to_string(), p.parse().unwrap_or(default_port))
+        }
+        _ => (
+            authority.trim_matches(['[', ']']).to_string(),
+            default_port,
+        ),
+    }
+}
+
+/// The configured custom provider, if any (base_url non-empty). Internal
+/// helper outside the uniffi surface — ProviderCfg is not a Record.
+fn custom_provider_cfg(
+    bridge: &Bridge,
+) -> Result<Option<ProviderCfg>, BridgeError> {
+    let s = bridge.store.as_ref().ok_or(BridgeError::NoStore)?;
+    match map_store(s.kv_get(PROVIDER_KV))? {
+        Some(json) => Ok(serde_json::from_str::<ProviderCfg>(&json)
+            .ok()
+            .filter(|c| !c.base_url.is_empty())),
+        None => Ok(None),
+    }
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 struct ProviderCfg {
@@ -639,6 +740,243 @@ impl Bridge {
         Ok(provider_record(&cfg))
     }
 
+    /// The effective ladder in try-order (Settings > Providers renders and
+    /// reorders these rows; the offline rung is always shown last).
+    pub fn ladder_rungs(&self) -> Result<Vec<LadderRungRecord>, BridgeError> {
+        let custom = custom_provider_cfg(self)?;
+        let saved: Option<Vec<String>> = {
+            let s = self.store.as_ref().ok_or(BridgeError::NoStore)?;
+            match map_store(s.kv_get(LADDER_KV))? {
+                Some(json) => serde_json::from_str::<Vec<String>>(&json).ok(),
+                None => None,
+            }
+        };
+        let mut rungs: Vec<LadderRungRecord> = ladder_order(saved, custom.as_ref().map(|c| c.name.clone()))
+            .into_iter()
+            .map(|id| {
+                let (desc, builtin) = match astrid_providers::builtin_rung(&id) {
+                    Some(b) => (b.desc.to_string(), true),
+                    None => match &custom {
+                        Some(c) if c.name == id => (
+                            format!(
+                                "your provider — {} ({})",
+                                c.base_url,
+                                if c.model.is_empty() { "model unset".to_string() } else { c.model.clone() }
+                            ),
+                            false,
+                        ),
+                        _ => (format!("configured rung {id}"), false),
+                    },
+                };
+                LadderRungRecord { id, desc, builtin }
+            })
+            .collect();
+        rungs.push(LadderRungRecord {
+            id: "offline".to_string(),
+            desc: "Local fallback agent — answers without a model, never fails".to_string(),
+            builtin: false,
+        });
+        Ok(rungs)
+    }
+
+    /// Persist the user's rung order (Settings > Providers). The offline rung
+    /// is implicit and always last — including it in the order is allowed
+    /// and ignored. Rebuilds the core so the ladder serves in the new order.
+    pub fn set_ladder(&self, order: Vec<String>) -> Result<Vec<LadderRungRecord>, BridgeError> {
+        let cleaned: Vec<String> = order
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s != "offline")
+            .collect();
+        if cleaned.is_empty() {
+            return Err(BridgeError::Io {
+                msg: "ladder order must contain at least one rung".into(),
+            });
+        }
+        let s = self.store.as_ref().ok_or(BridgeError::NoStore)?;
+        let json = serde_json::to_string(&cleaned)
+            .map_err(|e| BridgeError::Store { msg: e.to_string() })?;
+        map_store(s.kv_set(LADDER_KV, &json))?;
+        let data_dir = self.core_call(|core| core.data_dir.clone())?;
+        self.attach_core(data_dir)?;
+        self.append_event("ladder.order".into(), cleaned.join(" → "))?;
+        self.ladder_rungs()
+    }
+
+    /// Per-rung network self-test (Settings > Providers > Test): DNS, HTTPS
+    /// handshake (GET {base}/models), and a REAL chat request ("Say hi in 3
+    /// words") with latency and the first 200 chars of the answer. Every
+    /// failure carries the RAW error chain — never swallowed, never pretty.
+    pub fn net_selftest(&self, rung_id: String) -> Result<NetSelfTestReport, BridgeError> {
+        let rung_id = rung_id.trim().to_string();
+        let (base_url, chat_path, model) = match astrid_providers::builtin_rung(&rung_id) {
+            Some(b) => (
+                b.base_url.to_string(),
+                b.chat_path.to_string(),
+                b.model.to_string(),
+            ),
+            None if rung_id == "offline" => {
+                return Ok(NetSelfTestReport {
+                    rung: rung_id,
+                    checks: vec![NetSelfTestCheck {
+                        name: "local".to_string(),
+                        ok: true,
+                        detail: "offline agent — no network involved, always answers".to_string(),
+                        ms: 0,
+                    }],
+                });
+            }
+            None => {
+                let cfg = custom_provider_cfg(self)?.ok_or_else(|| BridgeError::Io {
+                    msg: format!("rung {rung_id} is not a configured provider"),
+                })?;
+                (
+                    cfg.base_url.clone(),
+                    "/chat/completions".to_string(),
+                    if cfg.model.is_empty() {
+                        "(model unset)".to_string()
+                    } else {
+                        cfg.model.clone()
+                    },
+                )
+            }
+        };
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|e| BridgeError::Io { msg: err_chain(&e) })?;
+        self.core_call(|core| {
+            core.rt.block_on(async {
+                let mut checks: Vec<NetSelfTestCheck> = Vec::new();
+
+                // DNS lookup of the host.
+                let t0 = Instant::now();
+                let (host, port) = host_of(&base_url);
+                let ms = t0.elapsed().as_millis() as u64;
+                match (host.as_str(), port).to_socket_addrs() {
+                    Ok(addrs) => {
+                        let count = addrs.count();
+                        checks.push(NetSelfTestCheck {
+                            name: "dns".into(),
+                            ok: count > 0,
+                            detail: format!("{host} resolved to {count} address(es)"),
+                            ms,
+                        });
+                    }
+                    Err(e) => checks.push(NetSelfTestCheck {
+                        name: "dns".into(),
+                        ok: false,
+                        detail: err_chain(&e),
+                        ms,
+                    }),
+                }
+
+                // HTTPS handshake + models listing.
+                let t0 = Instant::now();
+                match client.get(format!("{base_url}/models")).send().await {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let ms = t0.elapsed().as_millis() as u64;
+                        checks.push(NetSelfTestCheck {
+                            name: "https".into(),
+                            ok: status.is_success(),
+                            detail: format!(
+                                "GET {base_url}/models → HTTP {}",
+                                status.as_u16()
+                            ),
+                            ms,
+                        });
+                    }
+                    Err(e) => {
+                        let ms = t0.elapsed().as_millis() as u64;
+                        checks.push(NetSelfTestCheck {
+                            name: "https".into(),
+                            ok: false,
+                            detail: err_chain(&e),
+                            ms,
+                        });
+                    }
+                }
+
+                // A REAL chat request, timed, first 200 chars of the body.
+                let t0 = Instant::now();
+                let body = serde_json::json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Say hi in 3 words"}],
+                    "max_tokens": 512,
+                });
+                match client
+                    .post(format!("{base_url}{chat_path}"))
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let text = resp.text().await.unwrap_or_default();
+                        let ms = t0.elapsed().as_millis() as u64;
+                        if status.is_success() {
+                            let parsed = serde_json::from_str::<serde_json::Value>(&text).ok();
+                            let content = parsed
+                                .as_ref()
+                                .and_then(|v| {
+                                    v["choices"][0]["message"]["content"]
+                                        .as_str()
+                                        .map(str::to_string)
+                                })
+                                .filter(|s| !s.trim().is_empty())
+                                .or_else(|| {
+                                    // reasoning-only reply: show it, honestly labeled
+                                    parsed.as_ref().and_then(|v| {
+                                        v["choices"][0]["message"]["reasoning"]
+                                            .as_str()
+                                            .map(|s| {
+                                                format!("(reasoning-only reply) {s}")
+                                            })
+                                    })
+                                })
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "(unparsable body) {}",
+                                        text.chars().take(200).collect::<String>()
+                                    )
+                                });
+                            let first200: String = content.chars().take(200).collect();
+                            checks.push(NetSelfTestCheck {
+                                name: "chat".into(),
+                                ok: true,
+                                detail: format!(
+                                    "HTTP {} in {ms} ms — \"{first200}\"",
+                                    status.as_u16()
+                                ),
+                                ms,
+                            });
+                        } else {
+                            let first200: String = text.chars().take(200).collect();
+                            checks.push(NetSelfTestCheck {
+                                name: "chat".into(),
+                                ok: false,
+                                detail: format!("HTTP {} — {first200}", status.as_u16()),
+                                ms,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        let ms = t0.elapsed().as_millis() as u64;
+                        checks.push(NetSelfTestCheck {
+                            name: "chat".into(),
+                            ok: false,
+                            detail: err_chain(&e),
+                            ms,
+                        });
+                    }
+                }
+                NetSelfTestReport { rung: rung_id.clone(), checks }
+            })
+        })
+    }
+
     // ---- scheduler (rows here; Android WorkManager does the timing) ---------
 
     pub fn add_task(&self, name: String, every_minutes: u32) -> Result<TaskRecord, BridgeError> {
@@ -697,6 +1035,7 @@ impl Bridge {
         cfg.data_dir = data_dir.clone();
         cfg.permissions = Profile::Auto;
         cfg.mcp.enabled = false; // stdio MCP servers are a phase-9 surface
+        let mut custom_name: Option<String> = None;
         if let Some(json) = map_store(
             self.store
                 .as_ref()
@@ -710,7 +1049,7 @@ impl Bridge {
                         std::env::set_var("ASTRID_PROVIDER_KEY", &pcfg.api_key);
                     }
                     cfg.providers = ProvidersConfig {
-                        ladder: vec![pcfg.name.clone()],
+                        ladder: Vec::new(), // the effective order is set below
                         local_only: false,
                         providers: [(
                             pcfg.name.clone(),
@@ -724,9 +1063,23 @@ impl Bridge {
                         .into_iter()
                         .collect(),
                     };
+                    custom_name = Some(pcfg.name.clone());
                 }
             }
         }
+        // Effective ladder (Phase 4.1): the saved order wins (Settings >
+        // Providers reorder); otherwise built-in keyless rungs first, then
+        // the user's own rung; the offline agent is implicit and last.
+        let saved: Option<Vec<String>> = match map_store(
+            self.store
+                .as_ref()
+                .ok_or(BridgeError::NoStore)?
+                .kv_get(LADDER_KV),
+        )? {
+            Some(json) => serde_json::from_str::<Vec<String>>(&json).ok(),
+            None => None,
+        };
+        cfg.providers.ladder = ladder_order(saved, custom_name);
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -830,7 +1183,10 @@ mod tests {
             "small talk must be answered by the kernel gate, got: {}",
             reply.reply
         );
-        assert!(reply.provider.starts_with("offline"), "no provider configured in test");
+        assert_eq!(
+            reply.provider, "local (no model)",
+            "small talk is answered by the kernel gate, never by a provider"
+        );
 
         let msgs = b.recent_messages(10).expect("messages");
         assert_eq!(msgs.len(), 2, "user + assistant persisted");

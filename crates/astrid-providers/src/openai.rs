@@ -20,6 +20,9 @@ const CONNECT_TIMEOUT_SECS: u64 = 10;
 pub struct OpenAICompatProvider {
     id: String,
     base_url: String,
+    /// Path appended to base_url for the chat endpoint. Standard gateways use
+    /// `/chat/completions`; Pollinations' anonymous endpoint lives at `/openai`.
+    chat_path: String,
     model: String,
     api_key: Option<String>,
     client: reqwest::Client,
@@ -27,6 +30,18 @@ pub struct OpenAICompatProvider {
 
 impl OpenAICompatProvider {
     pub fn new(id: &str, base_url: &str, model: &str, api_key: Option<String>) -> Self {
+        Self::with_chat_path(id, base_url, model, api_key, "/chat/completions")
+    }
+
+    /// Full control over the chat path (built-in rungs need this for
+    /// Pollinations, whose OpenAI-compatible endpoint is `POST /openai`).
+    pub fn with_chat_path(
+        id: &str,
+        base_url: &str,
+        model: &str,
+        api_key: Option<String>,
+        chat_path: &str,
+    ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
@@ -35,6 +50,7 @@ impl OpenAICompatProvider {
         Self {
             id: id.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
+            chat_path: chat_path.to_string(),
             model: model.to_string(),
             api_key: api_key.filter(|k| !k.is_empty()),
             client,
@@ -268,7 +284,7 @@ impl Provider for OpenAICompatProvider {
     }
 
     async fn chat(&self, req: &ChatRequest) -> Result<ChatResponse> {
-        let url = format!("{}/chat/completions", self.base_url);
+        let url = format!("{}{}", self.base_url, self.chat_path);
         let body = build_request_body(req, &self.model);
 
         let mut call = self.client.post(&url).json(&body);
@@ -341,13 +357,28 @@ impl Provider for OpenAICompatProvider {
             None => (None, Vec::new()),
         };
 
+        // Reasoning-only guard (non-streaming twin of the pump guard):
+        // reasoning models that run out of tokens before any content must
+        // FAIL the rung so the ladder slides, instead of an empty answer.
+        let finish = choice.finish_reason.clone().unwrap_or_default();
+        if content.as_deref().map(str::trim).unwrap_or("").is_empty()
+            && tool_calls.is_empty()
+            && finish == "length"
+        {
+            return Err(Error::Provider(format!(
+                "{}: model spent the whole token budget on reasoning and produced no content (finish_reason=length)",
+                self.id
+            )));
+        }
+
         Ok(ChatResponse {
             content,
             tool_calls,
-            finish_reason: choice
-                .finish_reason
-                .clone()
-                .unwrap_or_else(|| "stop".to_string()),
+            finish_reason: if finish.is_empty() {
+                "stop".to_string()
+            } else {
+                finish
+            },
             provider: self.id.clone(),
         })
     }
@@ -360,7 +391,7 @@ impl Provider for OpenAICompatProvider {
         &self,
         req: &ChatRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamItem>> {
-        let url = format!("{}/chat/completions", self.base_url);
+        let url = format!("{}{}", self.base_url, self.chat_path);
         let mut body = build_request_body(req, &self.model);
         body["stream"] = Value::Bool(true);
 
@@ -527,6 +558,19 @@ impl Provider for OpenAICompatProvider {
                     arguments_json: arguments,
                 })
                 .collect();
+
+            // Reasoning-only guard: free-lane models (nemotron, gpt-oss) can
+            // spend the whole token budget reasoning and finish with NO
+            // content. That is a rung failure — slide, never an empty bubble.
+            if content.is_empty() && tool_calls.is_empty() && finish_reason == "length" {
+                let _ = tx
+                    .send(StreamItem::Failed(format!(
+                        "{id}: model spent the whole token budget on reasoning and produced no content (finish_reason=length)"
+                    )))
+                    .await;
+                return;
+            }
+
             let _ = tx
                 .send(StreamItem::Final(ChatResponse {
                     content: if content.is_empty() { None } else { Some(content) },

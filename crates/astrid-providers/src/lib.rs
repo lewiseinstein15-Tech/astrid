@@ -1,10 +1,12 @@
 //! astrid-providers — provider ladder, OpenAI-compatible client, offline fallback.
 
+pub mod builtin;
 pub mod chat;
 pub mod ladder;
 pub mod offline;
 pub mod openai;
 
+pub use builtin::{builtin_provider, builtin_rung, BUILTIN_IDS};
 pub use chat::{ChatMessage, ChatRequest, ChatResponse, Provider, Role, StreamItem, ToolCall, ToolSpec};
 pub use ladder::{AttemptRecord, LadderResult, LadderStream, ProviderLadder};
 pub use offline::OfflineProvider;

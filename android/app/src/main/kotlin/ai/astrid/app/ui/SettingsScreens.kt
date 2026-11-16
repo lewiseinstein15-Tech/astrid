@@ -15,15 +15,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uniffi.astrid_ffi.Bridge
+import uniffi.astrid_ffi.LadderRungRecord
+import uniffi.astrid_ffi.NetSelfTestCheck
+import uniffi.astrid_ffi.NetSelfTestReport
 
 /**
  * The settings cluster. Settings reads the live version and permissions
@@ -44,7 +57,7 @@ fun SettingsScreen(bridge: Bridge, onMenu: () -> Unit, onOpen: (Screen) -> Unit)
         ListRow("A", AccentSlate, "Approvals", "Rules stored; enforced from phase 9", tag = "settings/approvals") {
             onOpen(Screen.ApprovalRules)
         }
-        ListRow("A", AccentSlate, "About and updates", "Version and build info", tag = "settings/about") {
+        ListRow("A", AccentSlate, "About and updates", "Version and build info", chipLabel = "v$version", tag = "settings/about") {
             onOpen(Screen.About)
         }
         ListRow(
@@ -52,22 +65,20 @@ fun SettingsScreen(bridge: Bridge, onMenu: () -> Unit, onOpen: (Screen) -> Unit)
             "Safe tools run; risky calls are denied headlessly",
             chipLabel = profile
         )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Spacer(Modifier.weight(1f))
-            Chip("v$version", AccentSlate)
-        }
         SectionLabel("PROVIDERS", AccentSlate)
         val configured = provider != null && provider.baseUrl.isNotEmpty()
         ListRow(
             letter = if (configured) (provider?.name?.firstOrNull()?.uppercase() ?: "P") else "O",
             accent = AccentSlate,
-            title = if (configured) provider!!.name else "offline only",
+            title = if (configured) provider!!.name else "built-in free rungs",
             subtitle = if (configured) {
                 "${provider!!.baseUrl} · ${provider!!.model.ifEmpty { "default model" }}"
             } else {
-                "No provider yet — kilo-auto/free serves every turn"
+                // Honest: two keyless built-ins answer first, offline last —
+                // the real order lives in Settings > Providers.
+                "kilo-auto/free and Pollinations answer first; offline last"
             },
-            chipLabel = if (configured) "Configured" else "kilo-auto/free",
+            chipLabel = if (configured) "Configured" else "2 built-in",
             tag = "settings/provider",
             onClick = { onOpen(Screen.Providers) }
         )
@@ -77,7 +88,10 @@ fun SettingsScreen(bridge: Bridge, onMenu: () -> Unit, onOpen: (Screen) -> Unit)
     }
 }
 
-/** 17 — Providers: the form persists into the ladder (real rebuild). */
+/** 17 — Providers: the form persists into the ladder (real rebuild). The
+ * ladder order is editable and every rung carries the network self-test
+ * (INTERNET permission, DNS, HTTPS handshake, a real chat request) with a
+ * Copy report button — raw errors, never swallowed. */
 @Composable
 fun ProvidersScreen(bridge: Bridge, onMenu: () -> Unit) {
     val saved = remember { runCatching { bridge.provider() }.getOrNull() }
@@ -87,8 +101,67 @@ fun ProvidersScreen(bridge: Bridge, onMenu: () -> Unit) {
     var modelId by remember { mutableStateOf(saved?.model ?: "") }
     var result by remember { mutableStateOf<String?>(null) }
 
+    // Ladder order + network self-test state.
+    var rungs by remember {
+        mutableStateOf(runCatching { bridge.ladderRungs() }.getOrDefault(emptyList()))
+    }
+    var reports by remember { mutableStateOf(mapOf<String, NetSelfTestReport>()) }
+    var testing by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    val hasInternet = remember {
+        ContextCompat.checkSelfPermission(context, "android.permission.INTERNET") ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    fun testRung(id: String) {
+        if (testing != null) return
+        scope.launch {
+            testing = id
+            reports = reports + (id to runCatching {
+                withContext(Dispatchers.IO) { bridge.netSelftest(id) }
+            }.getOrElse { e ->
+                NetSelfTestReport(
+                    id,
+                    listOf(NetSelfTestCheck("error", false, "${e::class.simpleName}: ${e.message}", 0uL))
+                )
+            })
+            testing = null
+        }
+    }
+
+    fun moveRung(id: String, delta: Int) {
+        val ordered = rungs.filter { it.id != "offline" }
+        val idx = ordered.indexOfFirst { it.id == id }
+        if (idx == -1) return
+        val newIdx = idx + delta
+        if (newIdx < 0 || newIdx >= ordered.size) return
+        val mutable = ordered.toMutableList()
+        val item = mutable.removeAt(idx)
+        mutable.add(newIdx, item)
+        runCatching { bridge.setLadder(mutable.map { it.id }) }
+            .onSuccess { rungs = it }
+            .onFailure { e -> result = "Reorder failed: ${e.message}" }
+    }
+
+    fun reportText(): String = buildString {
+        appendLine(
+            "Astrid network self-test — v${ai.astrid.app.BuildConfig.VERSION_NAME} " +
+                "(code ${ai.astrid.app.BuildConfig.VERSION_CODE})"
+        )
+        appendLine("INTERNET permission: ${if (hasInternet) "granted" else "DENIED"}")
+        rungs.forEach { rung ->
+            appendLine("— rung ${rung.id} —")
+            val rep = reports[rung.id]
+            if (rep == null) appendLine("(not tested)") else rep.checks.forEach { c ->
+                appendLine("${c.name}: ${if (c.ok) "ok" else "ERROR"} in ${c.ms} ms — ${c.detail}")
+            }
+        }
+    }
+
     ScreenScaffold("Providers", AccentSlate, onMenu) {
-        SectionLabel("OPENAI-COMPATIBLE RUNG · FIRST ON THE LADDER", AccentSlate)
+        SectionLabel("YOUR OWN OPENAI-COMPATIBLE RUNG", AccentSlate)
         FormField("Provider name", name, tag = "provider/name") { name = it }
         FormField("Base URL", baseUrl, tag = "provider/url") { baseUrl = it }
         FormField("API key (stored app-private, injected as an env var)", apiKey, tag = "provider/key") { apiKey = it }
@@ -111,14 +184,70 @@ fun ProvidersScreen(bridge: Bridge, onMenu: () -> Unit) {
                     model = modelId.trim(),
                 )
             }.onSuccess {
-                result = "Saved — the ladder now serves ${name.trim()} first, offline last."
+                result = "Saved — your rung is on the ladder (real order below); " +
+                    "the built-in free rungs answer first unless you reorder."
                 runCatching { bridge.appendEvent("provider.saved", name.trim()) }
+                rungs = runCatching { bridge.ladderRungs() }.getOrDefault(rungs)
             }.onFailure { e ->
                 result = "Save failed: ${e.message}"
             }
         }
         result?.let {
             Card { KitText(it, if (it.startsWith("Save failed")) Danger else AccentGreen, 13, FontWeight.Bold) }
+        }
+
+        SectionLabel("LADDER ORDER · TRY TOP TO BOTTOM · OFFLINE LAST", AccentSlate)
+        rungs.forEach { rung ->
+            ListRow(
+                letter = if (rung.builtin) "B" else rung.id.firstOrNull()?.uppercase() ?: "R",
+                accent = if (rung.id == "offline") TextMuted else AccentGreen,
+                title = rung.id,
+                subtitle = rung.desc,
+                tag = "rung/${rung.id}"
+            )
+            if (rung.id != "offline") {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlineButton("Up", AccentSlate, tag = "rung/up/${rung.id}") { moveRung(rung.id, -1) }
+                    OutlineButton("Down", AccentSlate, tag = "rung/down/${rung.id}") { moveRung(rung.id, +1) }
+                    OutlineButton(
+                        if (testing == rung.id) "Testing…" else "Test",
+                        AccentOrange,
+                        tag = "rung/test/${rung.id}"
+                    ) { testRung(rung.id) }
+                }
+            }
+            reports[rung.id]?.checks?.forEach { check ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Dot(if (check.ok) AccentGreen else Danger)
+                    Spacer(Modifier.size(8.dp))
+                    KitText(
+                        "${check.name} (${check.ms} ms): ${check.detail}",
+                        if (check.ok) AccentGreen else Danger,
+                        11,
+                        FontWeight.Medium
+                    )
+                }
+            }
+        }
+        FilledButton("Test every rung", AccentOrange, tag = "nettest/run-all") {
+            rungs.forEach { testRung(it.id) }
+        }
+        Card {
+            KitText(
+                "INTERNET permission: ${if (hasInternet) "granted" else "DENIED — no network call can succeed"}",
+                if (hasInternet) AccentGreen else Danger,
+                13,
+                FontWeight.Bold
+            )
+        }
+        FilledButton("Copy report", AccentSlate, tag = "nettest/copy") {
+            clipboard.setText(AnnotatedString(reportText()))
         }
     }
 }

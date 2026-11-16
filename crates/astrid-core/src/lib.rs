@@ -11,8 +11,8 @@ pub mod ids;
 pub mod kernel;
 
 pub use config::{
-    AstridConfig, HooksConfig, McpConfig, McpServerConfig, PluginsConfig, Profile, ProviderConfig,
-    ProvidersConfig, TuiConfig,
+    AstridConfig, BUILTIN_LADDER, HooksConfig, McpConfig, McpServerConfig, PluginsConfig, Profile,
+    ProviderConfig, ProvidersConfig, TuiConfig,
 };
 pub use error::{Error, Result};
 pub use events::{

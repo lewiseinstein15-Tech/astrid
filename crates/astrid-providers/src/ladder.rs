@@ -93,12 +93,41 @@ fn parse_retry_after(error: &str) -> Option<Duration> {
 
 impl ProviderLadder {
     /// Build rungs in config order; a rung is configured iff the providers map
-    /// holds the id with BOTH base_url and model set. Unconfigured rungs stay
+    /// holds the id with BOTH base_url and model set. Built-in rungs
+    /// (kilo-auto/free, pollinations) are always configured — a config entry
+    /// for their id overrides the built-in endpoint. Unconfigured rungs stay
     /// as skipped placeholders so the ladder's shape is visible in receipts.
     /// The offline provider is appended last, always.
     pub fn from_config(cfg: &ProvidersConfig) -> Self {
         let mut rungs: Vec<Rung> = Vec::new();
         for id in &cfg.ladder {
+            // Built-in rungs serve without any config entry; a config entry
+            // with a base_url overrides the built-in endpoint entirely.
+            if let Some(b) = crate::builtin::builtin_rung(id) {
+                let overridden = cfg
+                    .providers
+                    .get(id)
+                    .is_some_and(|p| p.base_url.is_some() && p.model.is_some());
+                if !overridden {
+                    let skip_reason = if cfg.local_only {
+                        Some(format!(
+                            "local_only=true excludes built-in endpoint {}",
+                            b.base_url
+                        ))
+                    } else {
+                        None
+                    };
+                    rungs.push(Rung {
+                        id: id.clone(),
+                        provider: Some(Arc::new(crate::builtin::builtin_provider(
+                            id,
+                        )
+                        .expect("builtin_rung matched so the provider exists"))),
+                        skip_reason,
+                    });
+                    continue;
+                }
+            }
             let pc = cfg.providers.get(id);
             let configured = pc.is_some_and(|p| p.base_url.is_some() && p.model.is_some());
             if !configured {
@@ -460,9 +489,19 @@ mod tests {
         }
     }
 
+    /// Explicitly empty ladder — tests that mean "no rungs configured".
+    /// (ProvidersConfig::default() now carries the built-in rungs.)
+    fn empty_cfg() -> ProvidersConfig {
+        ProvidersConfig {
+            ladder: vec![],
+            local_only: false,
+            providers: std::collections::BTreeMap::new(),
+        }
+    }
+
     #[tokio::test]
     async fn empty_config_offline_serves_with_zero_slide() {
-        let ladder = ProviderLadder::from_config(&ProvidersConfig::default());
+        let ladder = ProviderLadder::from_config(&empty_cfg());
         let out = ladder.chat(&req()).await.unwrap();
         assert_eq!(out.provider_id, "offline");
         assert_eq!(out.response.provider, "offline");
@@ -630,7 +669,7 @@ mod tests {
 
     #[test]
     fn rung_summary_reports_states() {
-        let ladder = ProviderLadder::from_config(&ProvidersConfig::default());
+        let ladder = ProviderLadder::from_config(&empty_cfg());
         assert_eq!(
             ladder.rung_summary(),
             vec!["offline: configured".to_string()]
@@ -688,8 +727,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn streaming_offline_serves_final_without_deltas() {
+    async fn builtin_rungs_lead_the_default_ladder_and_hermetic_mode_skips_them() {
+        // Fresh-install default: the two built-in keyless rungs, then offline.
         let ladder = ProviderLadder::from_config(&ProvidersConfig::default());
+        let summary = ladder.rung_summary();
+        assert_eq!(summary.len(), 3, "kilo, pollinations, offline");
+        assert!(summary[0].starts_with("kilo-auto/free"), "{}", summary[0]);
+        assert!(summary[1].starts_with("pollinations"), "{}", summary[1]);
+        assert!(summary[2].starts_with("offline"), "{}", summary[2]);
+
+        // Hermetic mode excludes the built-ins WITHOUT hiding them: each
+        // attempt carries its skip reason, then offline serves.
+        let mut cfg = ProvidersConfig::default();
+        cfg.local_only = true;
+        let ladder = ProviderLadder::from_config(&cfg);
+        let out = ladder.chat(&req()).await.unwrap();
+        assert_eq!(out.provider_id, "offline");
+        assert_eq!(out.ladder_slid, 2, "both built-ins skipped as local_only");
+        let reasons: Vec<&str> = out
+            .attempts
+            .iter()
+            .filter_map(|a| a.skipped_reason.as_deref())
+            .collect();
+        assert_eq!(reasons.len(), 2);
+        assert!(reasons.iter().all(|r| r.contains("local_only=true")));
+    }
+
+    #[tokio::test]
+    async fn streaming_offline_serves_final_without_deltas() {
+        let ladder = ProviderLadder::from_config(&empty_cfg());
         let mut out = ladder.chat_stream(&req()).await.unwrap();
         assert_eq!(out.provider_id, "offline");
         assert_eq!(out.ladder_slid, 0);

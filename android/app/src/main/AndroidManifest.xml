@@ -6,6 +6,12 @@
         <package android:name="com.whatsapp" />
     </queries>
 
+    <!-- THE network fix (Phase 4.1): without INTERNET, Android blocks every
+         socket the process makes — including the Rust core's reqwest calls —
+         so no provider could ever answer. This single line is why the model
+         path never worked on Android. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Long agent turns promote to a foreground service so Android cannot
          kill the app mid-task (Phase 4). specialUse is declared honestly:
          an agent turn is not media / transfer / call — see TurnService. -->
