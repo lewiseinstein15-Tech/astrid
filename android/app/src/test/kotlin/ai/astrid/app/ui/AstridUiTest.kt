@@ -63,6 +63,11 @@ class AstridUiTest {
      */
     @Before
     fun hermeticLadder() {
+        // @Before runs BEFORE the compose rule launches MainActivity — init
+        // the bridge here so the first test cannot boot with the default
+        // ladder (the built-in rungs are real network endpoints).
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        AstridBridge.init(context.filesDir)
         runCatching { bridge.setLadder(listOf("offline")) }
     }
 
