@@ -1,13 +1,13 @@
 package ai.astrid.app
 
-import android.content.Intent
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import com.sun.net.httpserver.HttpServer
-import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -15,12 +15,14 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * THE app-path proof (Phase 4.1): a local fake OpenAI-compatible HTTP server
- * on 127.0.0.1 stands in for a provider rung; the send goes through the REAL
- * stack — Compose send → bridge.sendMessage → Rust core → ladder → reqwest →
- * HTTP → parsed reply → SQLite → bubble. When this test is green, the model
- * path works end to end; the same reqwest/rustls client then talks to the
- * built-in keyless rungs (kilo-auto/free, Pollinations) on a real device.
+ * THE app-path proof (Phase 4.1): a fake OpenAI-compatible HTTP server on
+ * 127.0.0.1 (pure java.net ServerSocket — no JDK-only packages, which are
+ * absent from the android.jar compile classpath) stands in for a provider
+ * rung; the send goes through the REAL stack — Compose send → bridge
+ * sendMessage → Rust core → ladder → reqwest → HTTP → parsed reply →
+ * SQLite → bubble. When this test is green, the model path works end to
+ * end; the same reqwest/rustls client then talks to the built-in keyless
+ * rungs (kilo-auto/free, Pollinations) on a real device.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w412dp-h915dp")
@@ -29,38 +31,81 @@ class FakeServerPathTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
 
-    /** OpenAI-compatible fake: one canned completion on the chat endpoint. */
-    private fun startFakeServer(): HttpServer {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/v1/chat/completions") { exchange ->
-            val body = """
-                {"id":"fake-1","object":"chat.completion","created":1,"model":"fake-model",
-                 "choices":[{"index":0,"finish_reason":"stop",
-                   "message":{"role":"assistant","content":"FAKE-REPLY-OK"}}],
-                 "usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}
-            """.trimIndent().toByteArray()
-            exchange.responseHeaders.add("Content-Type", "application/json")
-            exchange.sendResponseHeaders(200, body.size.toLong())
-            exchange.responseBody.use { it.write(body) }
+    /** One canned completion, served by a raw HTTP/1.1 thread. */
+    private class FakeOpenAiServer(private val server: ServerSocket) {
+        val port: Int get() = server.localPort
+
+        fun start() {
+            Thread {
+                while (!server.isClosed) {
+                    val socket = try {
+                        server.accept()
+                    } catch (e: Exception) {
+                        return@Thread
+                    }
+                    Thread { serve(socket) }.apply { isDaemon = true }.start()
+                }
+            }.apply { isDaemon = true }.start()
         }
+
+        private fun serve(socket: Socket) {
+            socket.use { s ->
+                val reader = s.getInputStream().bufferedReader()
+                var contentLength = 0
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (line.isBlank()) break
+                    if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                        contentLength = line.substringAfter(':').trim().toInt()
+                    }
+                }
+                if (contentLength > 0) reader.read(CharArray(contentLength))
+
+                val body = """
+                    {"id":"fake-1","object":"chat.completion","created":1,"model":"fake-model",
+                     "choices":[{"index":0,"finish_reason":"stop",
+                       "message":{"role":"assistant","content":"FAKE-REPLY-OK"}}],
+                     "usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}
+                """.trimIndent().toByteArray()
+                val head = "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: application/json\r\n" +
+                    "Content-Length: ${body.size}\r\n" +
+                    "Connection: close\r\n\r\n"
+                val out = s.getOutputStream()
+                out.write(head.toByteArray())
+                out.write(body)
+                out.flush()
+            }
+        }
+
+        fun stop() {
+            server.close()
+        }
+    }
+
+    private fun startFakeServer(): FakeOpenAiServer {
+        val server = FakeOpenAiServer(ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")))
         server.start()
         return server
+    }
+
+    private fun configureFakeRung(bridge: Bridge, server: FakeOpenAiServer) {
+        // Hermetic by construction: the ONLY remote rung is the fake on
+        // loopback — no test traffic ever reaches the internet.
+        bridge.setLadder(listOf("fake"))
+        bridge.setProvider(
+            name = "fake",
+            baseUrl = "http://127.0.0.1:${server.port}/v1",
+            apiKey = "",
+            model = "fake-model",
+        )
     }
 
     @Test
     fun aSendRunsTheRealHttpPathAndTheBubbleShowsTheAnswer() {
         val server = startFakeServer()
         try {
-            val bridge = AstridBridge.bridge
-            // Hermetic by construction: the ONLY remote rung is the fake on
-            // loopback — no test traffic ever reaches the internet.
-            bridge.setLadder(listOf("fake"))
-            bridge.setProvider(
-                name = "fake",
-                baseUrl = "http://127.0.0.1:${server.address.port}/v1",
-                apiKey = "",
-                model = "fake-model",
-            )
+            configureFakeRung(AstridBridge.bridge, server)
 
             // The real app path: type into the composer and tap send.
             compose.onNodeWithTag("chat/input").performTextInput("ping the fake rung")
@@ -70,9 +115,9 @@ class FakeServerPathTest {
             compose.waitUntil(timeoutMillis = 20_000) {
                 compose.onAllNodesWithText("FAKE-REPLY-OK").fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onAllNodesWithText("FAKE-REPLY-OK").fetchSemanticsNodes().isNotEmpty()
+            check(compose.onAllNodesWithText("FAKE-REPLY-OK").fetchSemanticsNodes().isNotEmpty())
         } finally {
-            server.stop(0)
+            server.stop()
         }
     }
 
@@ -80,30 +125,24 @@ class FakeServerPathTest {
     @Test
     fun bridgeSendMessageHitsTheFakeHttpServer() {
         val server = startFakeServer()
+        val dir = java.io.File(
+            System.getProperty("java.io.tmpdir"),
+            "astrid-fake-http-${System.nanoTime()}"
+        ).apply { mkdirs() }
         try {
-            val dir = java.io.File(
-                System.getProperty("java.io.tmpdir"),
-                "astrid-fake-http-${System.nanoTime()}"
-            ).apply { mkdirs() }
             val bridge = Bridge.withCore(
                 dbPath = dir.resolve("astrid.db").absolutePath,
                 dataDir = dir.resolve("core").absolutePath,
             )
-            bridge.setLadder(listOf("fake"))
-            bridge.setProvider(
-                name = "fake",
-                baseUrl = "http://127.0.0.1:${server.address.port}/v1",
-                apiKey = "",
-                model = "fake-model",
-            )
+            configureFakeRung(bridge, server)
             val reply = bridge.sendMessage("ping the fake rung")
             check(reply.reply.contains("FAKE-REPLY-OK")) {
                 "expected the fake server's answer, got: ${reply.provider} / ${reply.reply.take(200)}"
             }
             check(reply.provider == "fake") { "the serving rung must be labeled 'fake'" }
-            dir.deleteRecursively()
         } finally {
-            server.stop(0)
+            server.stop()
+            dir.deleteRecursively()
         }
     }
 }
