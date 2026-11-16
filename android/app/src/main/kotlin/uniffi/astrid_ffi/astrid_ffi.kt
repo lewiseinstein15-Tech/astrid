@@ -699,9 +699,13 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_ingest_upload(
     ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_ladder_rungs(
+    ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_mcp_report(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_memories(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_net_selftest(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_new_chat(
     ): Int
@@ -730,6 +734,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_astrid_ffi_checksum_method_bridge_send_message_with_files(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_set_connector(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_set_ladder(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_set_provider(
     ): Int
@@ -803,9 +809,13 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_ingest_upload(`ptr`: Long,`name`: RustBuffer.ByValue,`srcPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_ladder_rungs(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_mcp_report(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_memories(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_net_selftest(`ptr`: Long,`rungId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_new_chat(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -835,6 +845,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_set_connector(`ptr`: Long,`id`: RustBuffer.ByValue,`state`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_astrid_ffi_fn_method_bridge_set_ladder(`ptr`: Long,`order`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_set_provider(`ptr`: Long,`name`: RustBuffer.ByValue,`baseUrl`: RustBuffer.ByValue,`apiKey`: RustBuffer.ByValue,`model`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_set_task_enabled(`ptr`: Long,`id`: Long,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
@@ -1002,10 +1014,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_ingest_upload() and 0xFFFF) != 3819) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_ladder_rungs() and 0xFFFF) != 64837) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_mcp_report() and 0xFFFF) != 45558) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_memories() and 0xFFFF) != 14902) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_net_selftest() and 0xFFFF) != 52573) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_new_chat() and 0xFFFF) != 28021) {
@@ -1048,6 +1066,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_connector() and 0xFFFF) != 59041) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_ladder() and 0xFFFF) != 63456) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_provider() and 0xFFFF) != 49089) {
@@ -1509,11 +1530,25 @@ public interface BridgeInterface {
     fun `ingestUpload`(`name`: kotlin.String, `srcPath`: kotlin.String): UploadRecord
     
     /**
+     * The effective ladder in try-order (Settings > Providers renders and
+     * reorders these rows; the offline rung is always shown last).
+     */
+    fun `ladderRungs`(): List<LadderRungRecord>
+    
+    /**
      * The MCP connection report lines the session recorded at startup.
      */
     fun `mcpReport`(): List<kotlin.String>
     
     fun `memories`(): List<MemoryPageRecord>
+    
+    /**
+     * Per-rung network self-test (Settings > Providers > Test): DNS, HTTPS
+     * handshake (GET {base}/models), and a REAL chat request ("Say hi in 3
+     * words") with latency and the first 200 chars of the answer. Every
+     * failure carries the RAW error chain — never swallowed, never pretty.
+     */
+    fun `netSelftest`(`rungId`: kotlin.String): NetSelfTestReport
     
     /**
      * Start a new chat: a fresh persisted session row becomes the active one.
@@ -1567,6 +1602,13 @@ public interface BridgeInterface {
     fun `sendMessageWithFiles`(`text`: kotlin.String, `paths`: List<kotlin.String>): TurnReply
     
     fun `setConnector`(`id`: kotlin.String, `state`: kotlin.String)
+    
+    /**
+     * Persist the user's rung order (Settings > Providers). The offline rung
+     * is implicit and always last — including it in the order is allowed
+     * and ignored. Rebuilds the core so the ladder serves in the new order.
+     */
+    fun `setLadder`(`order`: List<kotlin.String>): List<LadderRungRecord>
     
     /**
      * Persist the provider rung and rebuild the session so the ladder
@@ -1882,6 +1924,24 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
 
     
     /**
+     * The effective ladder in try-order (Settings > Providers renders and
+     * reorders these rows; the offline rung is always shown last).
+     */
+    @Throws(BridgeException::class)override fun `ladderRungs`(): List<LadderRungRecord> {
+            return FfiConverterSequenceTypeLadderRungRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_ladder_rungs(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * The MCP connection report lines the session recorded at startup.
      */
     @Throws(BridgeException::class)override fun `mcpReport`(): List<kotlin.String> {
@@ -1905,6 +1965,27 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     UniffiLib.uniffi_astrid_ffi_fn_method_bridge_memories(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Per-rung network self-test (Settings > Providers > Test): DNS, HTTPS
+     * handshake (GET {base}/models), and a REAL chat request ("Say hi in 3
+     * words") with latency and the first 200 chars of the answer. Every
+     * failure carries the RAW error chain — never swallowed, never pretty.
+     */
+    @Throws(BridgeException::class)override fun `netSelftest`(`rungId`: kotlin.String): NetSelfTestReport {
+            return FfiConverterTypeNetSelfTestReport.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_net_selftest(
+        it,
+        
+        FfiConverterString.lower(`rungId`),_status)
 }
     }
     )
@@ -2138,6 +2219,26 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
 }
     }
     
+    
+
+    
+    /**
+     * Persist the user's rung order (Settings > Providers). The offline rung
+     * is implicit and always last — including it in the order is allowed
+     * and ignored. Rebuilds the core so the ladder serves in the new order.
+     */
+    @Throws(BridgeException::class)override fun `setLadder`(`order`: List<kotlin.String>): List<LadderRungRecord> {
+            return FfiConverterSequenceTypeLadderRungRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_set_ladder(
+        it,
+        
+        FfiConverterSequenceString.lower(`order`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -2642,6 +2743,59 @@ public object FfiConverterTypeEventRecord: FfiConverterRustBuffer<EventRecord> {
 
 
 /**
+ * One rung of the effective ladder, in try-order. The offline rung is
+ * always present as the last row (it is implicit in the Rust ladder).
+ */
+data class LadderRungRecord (
+    var `id`: kotlin.String
+    , 
+    /**
+     * One line of plain language: what this rung is.
+     */
+    var `desc`: kotlin.String
+    , 
+    /**
+     * True for the built-in keyless lanes (kilo-auto/free, pollinations).
+     */
+    var `builtin`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLadderRungRecord: FfiConverterRustBuffer<LadderRungRecord> {
+    override fun read(buf: ByteBuffer): LadderRungRecord {
+        return LadderRungRecord(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LadderRungRecord) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`desc`) +
+            FfiConverterBoolean.allocationSize(value.`builtin`)
+    )
+
+    override fun write(value: LadderRungRecord, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`desc`, buf)
+            FfiConverterBoolean.write(value.`builtin`, buf)
+    }
+}
+
+
+
+/**
  * One memory page (five-verb protocol store).
  */
 data class MemoryPageRecord (
@@ -2692,6 +2846,108 @@ public object FfiConverterTypeMemoryPageRecord: FfiConverterRustBuffer<MemoryPag
             FfiConverterString.write(value.`kind`, buf)
             FfiConverterBoolean.write(value.`forgotten`, buf)
             FfiConverterString.write(value.`updatedAt`, buf)
+    }
+}
+
+
+
+/**
+ * One check of the network self-test (Settings > Providers > Test).
+ */
+data class NetSelfTestCheck (
+    /**
+     * "dns" | "https" | "chat"
+     */
+    var `name`: kotlin.String
+    , 
+    var `ok`: kotlin.Boolean
+    , 
+    /**
+     * Human-readable result: the status line, the first 200 chars of the
+     * body, or the RAW error chain — errors are surfaced, never swallowed.
+     */
+    var `detail`: kotlin.String
+    , 
+    /**
+     * Wall-clock milliseconds this check took.
+     */
+    var `ms`: kotlin.ULong
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeNetSelfTestCheck: FfiConverterRustBuffer<NetSelfTestCheck> {
+    override fun read(buf: ByteBuffer): NetSelfTestCheck {
+        return NetSelfTestCheck(
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: NetSelfTestCheck) = (
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterBoolean.allocationSize(value.`ok`) +
+            FfiConverterString.allocationSize(value.`detail`) +
+            FfiConverterULong.allocationSize(value.`ms`)
+    )
+
+    override fun write(value: NetSelfTestCheck, buf: ByteBuffer) {
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterBoolean.write(value.`ok`, buf)
+            FfiConverterString.write(value.`detail`, buf)
+            FfiConverterULong.write(value.`ms`, buf)
+    }
+}
+
+
+
+/**
+ * The whole per-rung network self-test report.
+ */
+data class NetSelfTestReport (
+    var `rung`: kotlin.String
+    , 
+    var `checks`: List<NetSelfTestCheck>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeNetSelfTestReport: FfiConverterRustBuffer<NetSelfTestReport> {
+    override fun read(buf: ByteBuffer): NetSelfTestReport {
+        return NetSelfTestReport(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeNetSelfTestCheck.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: NetSelfTestReport) = (
+            FfiConverterString.allocationSize(value.`rung`) +
+            FfiConverterSequenceTypeNetSelfTestCheck.allocationSize(value.`checks`)
+    )
+
+    override fun write(value: NetSelfTestReport, buf: ByteBuffer) {
+            FfiConverterString.write(value.`rung`, buf)
+            FfiConverterSequenceTypeNetSelfTestCheck.write(value.`checks`, buf)
     }
 }
 
@@ -3414,6 +3670,34 @@ public object FfiConverterSequenceTypeEventRecord: FfiConverterRustBuffer<List<E
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeLadderRungRecord: FfiConverterRustBuffer<List<LadderRungRecord>> {
+    override fun read(buf: ByteBuffer): List<LadderRungRecord> {
+        val len = buf.getInt()
+        return List<LadderRungRecord>(len) {
+            FfiConverterTypeLadderRungRecord.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LadderRungRecord>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLadderRungRecord.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LadderRungRecord>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLadderRungRecord.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeMemoryPageRecord: FfiConverterRustBuffer<List<MemoryPageRecord>> {
     override fun read(buf: ByteBuffer): List<MemoryPageRecord> {
         val len = buf.getInt()
@@ -3432,6 +3716,34 @@ public object FfiConverterSequenceTypeMemoryPageRecord: FfiConverterRustBuffer<L
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeMemoryPageRecord.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeNetSelfTestCheck: FfiConverterRustBuffer<List<NetSelfTestCheck>> {
+    override fun read(buf: ByteBuffer): List<NetSelfTestCheck> {
+        val len = buf.getInt()
+        return List<NetSelfTestCheck>(len) {
+            FfiConverterTypeNetSelfTestCheck.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<NetSelfTestCheck>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeNetSelfTestCheck.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<NetSelfTestCheck>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeNetSelfTestCheck.write(it, buf)
         }
     }
 }
