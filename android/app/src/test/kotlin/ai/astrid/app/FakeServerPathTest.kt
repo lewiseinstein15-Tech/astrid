@@ -13,6 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import uniffi.astrid_ffi.Bridge
 
 /**
  * THE app-path proof (Phase 4.1): a fake OpenAI-compatible HTTP server on
