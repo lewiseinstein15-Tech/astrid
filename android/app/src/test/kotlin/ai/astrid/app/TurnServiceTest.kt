@@ -112,12 +112,12 @@ class TurnServiceTest {
             manifestText
         )
         assertTrue(
-            manifestText!!.contains("<property"),
-            "the subtype must be a <property> element"
+            "the subtype must be a <property> element",
+            manifestText!!.contains("<property")
         )
         assertTrue(
-            manifestText.contains("android:value=\"${TurnService.FGS_SUBTYPE}\""),
-            "the subtype value must equal TurnService.FGS_SUBTYPE (${TurnService.FGS_SUBTYPE})"
+            "the subtype value must equal TurnService.FGS_SUBTYPE (${TurnService.FGS_SUBTYPE})",
+            manifestText.contains("android:value=\"${TurnService.FGS_SUBTYPE}\"")
         )
 
         // The permissions promotion needs, requested by the app.
