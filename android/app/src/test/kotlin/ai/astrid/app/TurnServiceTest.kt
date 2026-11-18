@@ -94,12 +94,31 @@ class TurnServiceTest {
         )
 
         // The honest subtype: what the service does, declared to Android.
-        val property = pm.getProperty(
-            "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE",
-            ComponentName(context, TurnService::class.java)
+        // Robolectric does not implement PackageManager.getProperty (it fails
+        // with NameNotFound "unsupported"), so the property is verified
+        // against the merged manifest AGP produces on disk.
+        val manifestDirs = listOf(
+            java.io.File("build/intermediates/merged_manifests"),
+            java.io.File("app/build/intermediates/merged_manifests"),
+        ).filter { it.isDirectory }
+        val manifestText = manifestDirs
+            .asSequence()
+            .flatMap { it.walkTopDown().filter { f -> f.name == "AndroidManifest.xml" } }
+            .map { it.readText() }
+            .firstOrNull { it.contains("PROPERTY_SPECIAL_USE_FGS_SUBTYPE") }
+        assertNotNull(
+            "PROPERTY_SPECIAL_USE_FGS_SUBTYPE must be declared in the merged manifest " +
+                "(scanned: ${manifestDirs.map { it.path }})",
+            manifestText
         )
-        assertNotNull("PROPERTY_SPECIAL_USE_FGS_SUBTYPE must be declared", property)
-        assertEquals(TurnService.FGS_SUBTYPE, property!!.getString())
+        assertTrue(
+            manifestText!!.contains("<property"),
+            "the subtype must be a <property> element"
+        )
+        assertTrue(
+            manifestText.contains("android:value=\"${TurnService.FGS_SUBTYPE}\""),
+            "the subtype value must equal TurnService.FGS_SUBTYPE (${TurnService.FGS_SUBTYPE})"
+        )
 
         // The permissions promotion needs, requested by the app.
         val requested = pm

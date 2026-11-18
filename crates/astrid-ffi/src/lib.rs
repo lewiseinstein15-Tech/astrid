@@ -780,13 +780,15 @@ impl Bridge {
     }
 
     /// Persist the user's rung order (Settings > Providers). The offline rung
-    /// is implicit and always last — including it in the order is allowed
-    /// and ignored. Rebuilds the core so the ladder serves in the new order.
+    /// is implicit and always last. Rebuilds the core so the ladder serves
+    /// in the new order. The saved order KEEPS "offline" as a row (the UI
+    /// lists it); the ladder builder strips it — so a hermetic order of just
+    /// ["offline"] is valid and yields offline-only service.
     pub fn set_ladder(&self, order: Vec<String>) -> Result<Vec<LadderRungRecord>, BridgeError> {
         let cleaned: Vec<String> = order
             .into_iter()
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty() && s != "offline")
+            .filter(|s| !s.is_empty())
             .collect();
         if cleaned.is_empty() {
             return Err(BridgeError::Io {
@@ -1122,6 +1124,21 @@ uniffi::setup_scaffolding!("astrid_ffi");
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ladder_order_handles_the_hermetic_offline_only_order() {
+        // setLadder(["offline"]) — the UI/test hermetic switch — must yield
+        // an empty pre-offline ladder (from_config re-appends offline).
+        assert_eq!(
+            ladder_order(Some(vec!["offline".to_string()]), None),
+            Vec::<String>::new()
+        );
+        // Fresh install: built-ins first; the user's rung follows.
+        assert_eq!(
+            ladder_order(None, Some("mine".to_string())),
+            vec!["kilo-auto/free".to_string(), "pollinations".to_string(), "mine".to_string()]
+        );
+    }
 
     #[test]
     fn app_info_matches_the_version_file() {

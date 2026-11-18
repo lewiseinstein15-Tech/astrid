@@ -60,22 +60,53 @@ class FakeServerPathTest {
                         contentLength = line.substringAfter(':').trim().toInt()
                     }
                 }
-                if (contentLength > 0) reader.read(CharArray(contentLength))
 
-                val body = """
-                    {"id":"fake-1","object":"chat.completion","created":1,"model":"fake-model",
-                     "choices":[{"index":0,"finish_reason":"stop",
-                       "message":{"role":"assistant","content":"FAKE-REPLY-OK"}}],
-                     "usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}
-                """.trimIndent().toByteArray()
-                val head = "HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: application/json\r\n" +
-                    "Content-Length: ${body.size}\r\n" +
-                    "Connection: close\r\n\r\n"
                 val out = s.getOutputStream()
-                out.write(head.toByteArray())
-                out.write(body)
-                out.flush()
+                if (contentLength > 0) {
+                    val buf = CharArray(contentLength)
+                    var read = 0
+                    while (read < contentLength) {
+                        val n = reader.read(buf, read, contentLength - read)
+                        if (n < 0) break
+                        read += n
+                    }
+                    val requestBody = String(buf, 0, read)
+
+                    if (requestBody.contains("\"stream\":true")) {
+                        // The core's agent turn streams (SSE). Answer the way
+                        // OpenAI-compatible servers do: content delta, finish
+                        // reason, then [DONE].
+                        val sse = buildString {
+                            append(
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"FAKE-REPLY-OK\"}," +
+                                    "\"finish_reason\":null}]}\n\n"
+                            )
+                            append("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+                            append("data: [DONE]\n\n")
+                        }.toByteArray()
+                        val head = "HTTP/1.1 200 OK\r\n" +
+                            "Content-Type: text/event-stream\r\n" +
+                            "Connection: close\r\n\r\n"
+                        out.write(head.toByteArray())
+                        out.write(sse)
+                        out.flush()
+                        return
+                    }
+
+                    val body = """
+                        {"id":"fake-1","object":"chat.completion","created":1,"model":"fake-model",
+                         "choices":[{"index":0,"finish_reason":"stop",
+                           "message":{"role":"assistant","content":"FAKE-REPLY-OK"}}],
+                         "usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}
+                    """.trimIndent().toByteArray()
+                    val head = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json\r\n" +
+                        "Content-Length: ${body.size}\r\n" +
+                        "Connection: close\r\n\r\n"
+                    out.write(head.toByteArray())
+                    out.write(body)
+                    out.flush()
+                }
             }
         }
 
@@ -138,7 +169,8 @@ class FakeServerPathTest {
             configureFakeRung(bridge, server)
             val reply = bridge.sendMessage("ping the fake rung")
             check(reply.reply.contains("FAKE-REPLY-OK")) {
-                "expected the fake server's answer, got: ${reply.provider} / ${reply.reply.take(200)}"
+                "expected the fake server's answer, got provider=${reply.provider}, " +
+                    "fallback=${reply.fallbackReason ?: "none"}, reply=${reply.reply.take(200)}"
             }
             check(reply.provider == "fake") { "the serving rung must be labeled 'fake'" }
         } finally {
