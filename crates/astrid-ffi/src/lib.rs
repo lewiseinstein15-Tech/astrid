@@ -430,9 +430,13 @@ impl Bridge {
     }
 
     pub fn recent_events(&self, limit: u32) -> Result<Vec<EventRecord>, BridgeError> {
-        // Drain before reading: the reader must see the tail of the last
-        // turn, not whatever made it through before the runtime parked.
-        self.drain_audit();
+        // Quick drain before reading: pull whatever already reached the
+        // broadcast channel WITHOUT driving the runtime — this method is
+        // called from UI polling loops, and blocking here (a turn holds
+        // the core mutex for its whole duration; a driving drain parks
+        // ~40ms per call) would keep compose from ever reporting idle.
+        // The runtime-driving drain after each turn lands the tail rows.
+        self.drain_audit_quick();
         let s = self.store.as_ref().ok_or(BridgeError::NoStore)?;
         map_store(s.recent(limit))
     }
@@ -1028,6 +1032,36 @@ impl Bridge {
     fn with_core_ref<R>(&self, f: impl FnOnce(&Core) -> R) -> Option<R> {
         let guard = self.core.lock().unwrap_or_else(|e| e.into_inner());
         guard.as_ref().map(f)
+    }
+
+    /// Non-blocking variant for UI polling paths: try_recv only (no
+    /// block_on, no runtime driving), skipped entirely while a turn holds
+    /// the core mutex. Costs ~0ms; a driving drain never runs here.
+    fn drain_audit_quick(&self) {
+        let store = match self.store.as_ref() {
+            Some(s) => s.clone(),
+            None => return,
+        };
+        let mut guard = match self.core.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        let core = match guard.as_mut() {
+            Some(c) => c,
+            None => return,
+        };
+        let events = &mut core.events;
+        loop {
+            match events.try_recv() {
+                Ok(event) => {
+                    if let Some((kind, text)) = event_row(&event) {
+                        let _ = store.append(&kind, &text);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            }
+        }
     }
 
     /// Synchronously drain the core's event stream into the audit log (the
