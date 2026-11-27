@@ -72,8 +72,17 @@ class AstridUiTest {
         // bridge singleton and runs before this class (alphabetical test
         // order); clear the provider config so the composer chip falls back
         // to the built-in kilo-auto/free label.
-        runCatching { bridge.setProvider("offline", "", "", "") }
         runCatching { bridge.setLadder(listOf("offline")) }
+        // ApprovalFlowTest runs before this class and its popup test leaves
+        // an approval pending on the shared bridge singleton; the ApprovalHost
+        // scrim would then cover the drawer/chat/knowledge screens. Resolve
+        // any leftover approval (deny — nothing may run) before the UI boots.
+        derivePendingApproval(bridge)?.let { p ->
+            runCatching {
+                if (p.kind == "shell") bridge.resolveShell(p.approvalId, false)
+                else bridge.resolveApproval(false)
+            }
+        }
     }
 
     private fun openDrawer() {

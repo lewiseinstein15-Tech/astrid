@@ -12,6 +12,7 @@ import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -40,6 +41,20 @@ class ApprovalFlowTest {
         AstridBridge.init(context.filesDir)
         runCatching { bridge.setLadder(listOf("offline")) }
     }
+    @After
+    fun resolveAnyPendingApproval() {
+        // The bridge is a process-wide singleton: an approval left pending
+        // here (the popup test never resolves it) would put the ApprovalHost
+        // scrim over every later test class's screen (drawer, chat, ingest).
+        // Deny it — nothing may run outside a test that approves explicitly.
+        derivePendingApproval(bridge)?.let { p ->
+            runCatching {
+                if (p.kind == "shell") bridge.resolveShell(p.approvalId, false)
+                else bridge.resolveApproval(false)
+            }
+        }
+    }
+
 
     private fun tagExists(tag: String): Boolean =
         runCatching { compose.onNodeWithTag(tag).assertExists(); true }.getOrDefault(false)
