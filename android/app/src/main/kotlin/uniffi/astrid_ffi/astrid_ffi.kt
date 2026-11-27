@@ -1068,7 +1068,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_connector() and 0xFFFF) != 59041) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_ladder() and 0xFFFF) != 63456) {
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_ladder() and 0xFFFF) != 2612) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_provider() and 0xFFFF) != 49089) {
@@ -1605,8 +1605,10 @@ public interface BridgeInterface {
     
     /**
      * Persist the user's rung order (Settings > Providers). The offline rung
-     * is implicit and always last — including it in the order is allowed
-     * and ignored. Rebuilds the core so the ladder serves in the new order.
+     * is implicit and always last. Rebuilds the core so the ladder serves
+     * in the new order. The saved order KEEPS "offline" as a row (the UI
+     * lists it); the ladder builder strips it — so a hermetic order of just
+     * ["offline"] is valid and yields offline-only service.
      */
     fun `setLadder`(`order`: List<kotlin.String>): List<LadderRungRecord>
     
@@ -2224,8 +2226,10 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     
     /**
      * Persist the user's rung order (Settings > Providers). The offline rung
-     * is implicit and always last — including it in the order is allowed
-     * and ignored. Rebuilds the core so the ladder serves in the new order.
+     * is implicit and always last. Rebuilds the core so the ladder serves
+     * in the new order. The saved order KEEPS "offline" as a row (the UI
+     * lists it); the ladder builder strips it — so a hermetic order of just
+     * ["offline"] is valid and yields offline-only service.
      */
     @Throws(BridgeException::class)override fun `setLadder`(`order`: List<kotlin.String>): List<LadderRungRecord> {
             return FfiConverterSequenceTypeLadderRungRecord.lift(
