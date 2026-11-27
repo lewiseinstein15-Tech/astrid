@@ -184,6 +184,7 @@ dependencies = [
  "astrid-core",
  "astrid-memory",
  "astrid-providers",
+ "astrid-tools",
  "astrid-workforce",
  "reqwest",
  "rusqlite",

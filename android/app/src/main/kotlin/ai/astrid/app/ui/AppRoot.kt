@@ -19,8 +19,9 @@ import uniffi.astrid_ffi.Bridge
  * provider sheet live here; the attach menu and the SAF/camera flows live in
  * the Chat composer (uploads and photos are message attachments now). Every
  * screen renders REAL data from the bridge — no sample data anywhere. The
- * approval popup returns with the approvals phase (9) when the core actually
- * requests one.
+ * approval popup is LIVE (phase 5): the core and the app-agent shell surface
+ * route their requests through ApprovalHost, in the foreground as a popup and
+ * in the background as a notification.
  */
 enum class Screen(val title: String, val accent: Color) {
     Chat("Astrid", AccentOrange),
@@ -116,5 +117,8 @@ fun AstridApp(bridge: Bridge) {
                 onClose = { providerOpen = false }
             )
         }
+        // Phase 5: the live approval popup — above every screen; the agent
+        // waits until Deny or Approve is tapped (or the notification answers).
+        ApprovalHost(bridge = bridge)
     }
 }

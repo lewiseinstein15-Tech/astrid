@@ -37,4 +37,16 @@ class MainActivity : ComponentActivity() {
             AstridApp(bridge = AstridBridge.bridge)
         }
     }
+
+    override fun onPause() {
+        super.onPause()
+        // Background: a waiting approval must stay answerable — the
+        // notification carries the same Deny/Approve buttons as the popup.
+        runCatching { ApprovalNotifier.maybeNotify(this) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        runCatching { ApprovalNotifier.cancel(this) }
+    }
 }

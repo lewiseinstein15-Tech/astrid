@@ -55,7 +55,7 @@ fun SettingsScreen(bridge: Bridge, onMenu: () -> Unit, onOpen: (Screen) -> Unit)
 
     ScreenScaffold("Settings", AccentSlate, onMenu) {
         SectionLabel("GENERAL", AccentSlate)
-        ListRow("A", AccentSlate, "Approvals", "Rules stored; enforced from phase 9", tag = "settings/approvals") {
+        ListRow("A", AccentSlate, "Approvals", "Live — risky commands ask first (phase 5)", tag = "settings/approvals") {
             onOpen(Screen.ApprovalRules)
         }
         ListRow("A", AccentSlate, "About and updates", "Version and build info", chipLabel = "v$version", tag = "settings/about") {
@@ -253,7 +253,7 @@ fun ProvidersScreen(bridge: Bridge, onMenu: () -> Unit) {
     }
 }
 
-/** 18 — Approval rules: real CRUD; the core stores, phase 9 enforces. */
+/** 18 — Approval rules: live since phase 5 — the five risky patterns ask first, read-only runs free, your rules are stored and shown here. */
 @Composable
 fun ApprovalRulesScreen(bridge: Bridge, onMenu: () -> Unit) {
     var rules by remember { mutableStateOf(runCatching { bridge.rules() }.getOrDefault(emptyList())) }
@@ -262,7 +262,14 @@ fun ApprovalRulesScreen(bridge: Bridge, onMenu: () -> Unit) {
     var decision by remember { mutableStateOf("deny") }
 
     ScreenScaffold("Approvals", AccentSlate, onMenu) {
-        SectionLabel("RULES · ${rules.size} · STORED NOW, ENFORCED FROM PHASE 9", AccentSlate)
+        SectionLabel("LIVE · RISKY COMMANDS ASK FIRST · READ-ONLY RUNS FREE", AccentSlate)
+        Card {
+            KitText("Built-in ask-first patterns", TextPrimary, 13, FontWeight.SemiBold)
+            KitText("rm -rf · git push · git commit · git reset --hard · curl | sh", TextMuted, 12, FontWeight.Medium)
+            KitText("Read-only (ls, cat, git status, …) never asks. Every decision lands in the Live trace.", TextMuted, 12, FontWeight.Medium)
+            val folder = runCatching { bridge.sandboxDir() }.getOrDefault("")
+            if (folder.isNotEmpty()) KitText("Sandbox folder: $folder", TextMuted, 12, FontWeight.Medium)
+        }
         if (rules.isEmpty()) {
             Card { KitText("No rules yet.", TextMuted, 13, FontWeight.Medium) }
         }
