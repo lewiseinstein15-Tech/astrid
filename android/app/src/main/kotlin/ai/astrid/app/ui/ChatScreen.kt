@@ -252,7 +252,7 @@ fun ChatScreen(
             .background(Bg)
             .testTag("screen/Chat")
     ) {
-        Header(onMenu)
+        Header(onMenu, sending)
         StepBar(current = 1)
 
         LazyColumn(
@@ -684,7 +684,7 @@ private fun MenuItem(
 }
 
 @Composable
-private fun Header(onMenu: () -> Unit) {
+private fun Header(onMenu: () -> Unit, working: Boolean) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -711,6 +711,10 @@ private fun Header(onMenu: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         KitText("Astrid", TextPrimary, 18, FontWeight.Bold)
         Spacer(Modifier.weight(1f))
-        Chip("Working", AccentGreen)
+        if (working) {
+            Chip("Working", AccentGreen)
+        } else {
+            Chip("Ready", AccentSlate)
+        }
     }
 }
