@@ -232,8 +232,8 @@ mod tests {
         let auto = PermissionGate::new(Profile::Auto);
         assert_eq!(auto.decision(Risk::Safe), GateDecision::Allow);
         assert_eq!(auto.decision(Risk::Medium), GateDecision::Allow);
-        assert_eq!(auto.decision(Risk::High), GateDecision::Ask);
-        assert_eq!(auto.decision(Risk::External), GateDecision::Ask);
+        assert_eq!(auto.decision(Risk::High), GateDecision::Ask(None));
+        assert_eq!(auto.decision(Risk::External), GateDecision::Ask(None));
 
         let full = PermissionGate::new(Profile::Full);
         for risk in [Risk::Safe, Risk::Medium, Risk::High, Risk::External] {

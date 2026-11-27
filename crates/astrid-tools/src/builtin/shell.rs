@@ -152,7 +152,7 @@ mod tests {
         );
         let meta = out.meta_json.unwrap();
         assert_eq!(meta["cwd"], root.display().to_string());
-        std::fs::remove_dir_all(_root).ok();
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[tokio::test]

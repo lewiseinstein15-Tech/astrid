@@ -1600,6 +1600,77 @@ mod tests {
     }
 
     #[test]
+    fn the_shell_surface_asks_denies_runs_and_refuses_outside_paths() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("astrid.db").to_string_lossy().into_owned();
+        let data = dir.path().join("data").to_string_lossy().into_owned();
+        let b = Bridge::with_core(db, data).expect("bridge with core");
+
+        // Read-only commands run free, inside the sandbox folder.
+        let rec = b.shell_command("echo ffi-shell-ok".into()).expect("shell");
+        assert_eq!(rec.outcome, "ran", "read-only must run without asking");
+        assert!(rec.output.contains("ffi-shell-ok"), "got: {}", rec.output);
+
+        // A risky command asks first and carries an approval id + reason.
+        let rec = b.shell_command("rm -rf sub".into()).expect("shell");
+        assert_eq!(rec.outcome, "needs_approval");
+        assert!(!rec.approval_id.is_empty(), "an approval id must be returned");
+        assert!(rec.reason.contains("rm -rf"), "the popup why: {}", rec.reason);
+
+        // Deny stops the command.
+        let id = rec.approval_id.clone();
+        let rec = b.resolve_shell(id, false).expect("resolve");
+        assert_eq!(rec.outcome, "refused");
+        assert!(rec.reason.contains("denied by you"), "got: {}", rec.reason);
+
+        // Approve runs the command inside the sandbox folder.
+        let rec = b.shell_command("rm -rf sub2".into()).expect("shell");
+        let rec = b.resolve_shell(rec.approval_id, true).expect("resolve");
+        assert_eq!(rec.outcome, "ran");
+
+        // A path outside the sandbox folder is refused with a clear error.
+        let rec = b.shell_command("cat /etc/passwd".into()).expect("shell");
+        assert_eq!(rec.outcome, "refused");
+        assert!(
+            rec.reason.contains("outside the sandbox folder"),
+            "got: {}",
+            rec.reason
+        );
+
+        // Every decision is in the audit log (Live trace).
+        let rows = b.recent_events(60u32).expect("rows");
+        for kind in [
+            "shell.requested",
+            "shell.approved",
+            "shell.denied",
+            "shell.ran",
+            "shell.refused",
+        ] {
+            assert!(
+                rows.iter().any(|r| r.kind == kind),
+                "the audit log must contain a {kind} row"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sandbox_folder_is_a_dedicated_agent_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("astrid.db").to_string_lossy().into_owned();
+        let data = dir.path().join("data").to_string_lossy().into_owned();
+        let b = Bridge::with_core(db, data).expect("bridge with core");
+        let sandbox = b.sandbox_dir();
+        assert!(
+            sandbox.ends_with("agent-sandbox"),
+            "sandbox must be a dedicated folder, got: {sandbox}"
+        );
+        assert!(
+            std::path::Path::new(&sandbox).is_dir(),
+            "the sandbox folder must exist: {sandbox}"
+        );
+    }
+
+    #[test]
     fn a_turns_audit_rows_are_visible_the_moment_send_returns() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = dir.path().join("astrid.db").to_string_lossy().into_owned();

@@ -697,21 +697,35 @@ mod tests {
         let (ctx, mut rx, _root) = make_ctx().await;
         let mut registry = ToolRegistry::with_builtins();
         registry.gate.profile = Profile::Full; // full would allow shell_run
+        // Phase 5: the hard denies (mkfs / dd if= / sudo / fork bomb) are
+        // never approvable, so even Profile::Full cannot get them through —
+        // the RiskGuard refuses at step 3 with a labeled reason. Destructive
+        // commands that are merely ask-listed (rm -rf inside the sandbox)
+        // are covered by the gate tests and the approval-flow tests.
         let err = registry
             .dispatch(
                 &ctx,
                 "shell_run",
-                json!({"command": "rm -rf /"}),
+                json!({"command": "mkfs.ext4 /dev/sda1"}),
                 &HookRegistry::default(),
                 1_000,
             )
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("rm -rf"));
+        assert!(
+            err.to_string().contains("[gate: denied] filesystem reformat"),
+            "Profile::Full must not bypass the risk-guard deny, got: {err}"
+        );
         let events = drain(&mut rx).await;
         assert_eq!(
             count(&events, |e| matches!(e, Event::ToolRefused { .. })),
             1
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::ApprovalRequested { .. })),
+            "a hard deny must never open an approval request"
         );
         // No approval row may appear — the call died at the RiskGuard stage.
         assert_eq!(
