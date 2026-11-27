@@ -39,7 +39,7 @@ impl Tool for ShellRun {
         })
     }
     async fn execute(&self, args: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
-        let _ = ctx;
+        let sandbox = ctx.confinement_root.clone();
         let command = req_str(self.name(), args, "command")?;
         let timeout_ms = opt_usize(self.name(), args, "timeout_ms")?
             .map(|ms| ms as u64)
@@ -47,9 +47,20 @@ impl Tool for ShellRun {
             .max(100)
             .min(MAX_TIMEOUT_MS);
 
+        // Phase 5 sandbox: the command runs with cwd INSIDE the app sandbox
+        // folder, and an explicit absolute path outside it is refused here,
+        // before spawn, with a clear error naming the token.
+        if let Err(reason) = crate::gate::shell_sandbox_guard(&command, &sandbox) {
+            return Err(Error::ToolRefused {
+                tool: self.name().to_string(),
+                reason,
+            });
+        }
+
         let child = Command::new("sh")
             .arg("-c")
             .arg(&command)
+            .current_dir(&sandbox)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -86,6 +97,7 @@ impl Tool for ShellRun {
                         "duration_ms": duration_ms,
                         "timed_out": false,
                         "truncated": truncated,
+                        "cwd": sandbox.display().to_string(),
                     })),
                 })
             }
@@ -124,6 +136,38 @@ mod tests {
         let meta = out.meta_json.unwrap();
         assert_eq!(meta["exit_code"], 0);
         assert_eq!(meta["timed_out"], false);
+    }
+
+    #[tokio::test]
+    async fn commands_run_inside_the_sandbox_folder() {
+        let (ctx, _rx, root) = make_ctx().await;
+        let out = ShellRun
+            .execute(&json!({"command": "pwd"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            out.content.contains(root.to_string_lossy().as_ref()),
+            "pwd must report the sandbox folder, got: {}",
+            out.content
+        );
+        let meta = out.meta_json.unwrap();
+        assert_eq!(meta["cwd"], root.display().to_string());
+        std::fs::remove_dir_all(_root).ok();
+    }
+
+    #[tokio::test]
+    async fn a_path_outside_the_sandbox_is_refused_with_a_clear_error() {
+        let (ctx, _rx, _root) = make_ctx().await;
+        let err = ShellRun
+            .execute(&json!({"command": "cat /etc/passwd"}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::ToolRefused { ref reason, .. } if reason.contains("outside the sandbox folder")),
+            "got: {err}"
+        );
+        assert!(err.to_string().contains("/etc/passwd"), "got: {err}");
+        std::fs::remove_dir_all(_root).ok();
     }
 
     #[tokio::test]

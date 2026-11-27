@@ -20,6 +20,7 @@ rusqlite = { version = "0.42", features = ["bundled"] }
 # roster and skills catalog come from the same crates the TUI ships.
 astrid = { path = "../astrid" }
 astrid-core = { workspace = true }
+astrid-tools = { path = "../astrid-tools" }
 astrid-memory = { workspace = true }
 astrid-workforce = { workspace = true }
 # Built-in rung ids + the per-rung network self-test endpoints.

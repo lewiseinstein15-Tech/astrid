@@ -235,7 +235,9 @@ impl ToolRegistry {
         )
         .await;
 
-        // 3. RiskGuard: refuse on the ACTUAL args (rm -rf, /etc writes, …).
+        // 3. RiskGuard: refuse on the ACTUAL args (mkfs, sudo, …); an Ask
+        // from the guard means the argument itself is risky (the phase 5
+        // approval list) — its reason is shown in the approval popup.
         let risk_decision = RiskGuard::refine(name, &args);
         if let GateDecision::Deny(reason) = &risk_decision {
             tracing::warn!(tool = name, %reason, "risk guard refused tool args");
@@ -246,6 +248,10 @@ impl ToolRegistry {
                 reason: labeled,
             });
         }
+        let guard_ask_reason: Option<String> = match &risk_decision {
+            GateDecision::Ask(reason) => reason.clone(),
+            _ => None,
+        };
 
         // 4. PreToolUse hooks, sequentially; Block refuses the call.
         let hook_payload = json!({
@@ -280,8 +286,14 @@ impl ToolRegistry {
             }
         }
 
-        // 5. Permission gate: deny → refused; ask → approval sink.
-        let gate_decision = self.gate.decision(risk);
+        // 5. Permission gate: deny → refused; ask → approval sink. An Ask
+        // from the RiskGuard wins: the concrete arguments are risky even
+        // when the tool risk class alone would allow.
+        let gate_decision = if guard_ask_reason.is_some() {
+            GateDecision::Ask(guard_ask_reason.clone())
+        } else {
+            self.gate.decision(risk)
+        };
         match &gate_decision {
             GateDecision::Deny(reason) => {
                 tracing::info!(tool = name, %reason, "permission gate denied tool");
@@ -292,8 +304,14 @@ impl ToolRegistry {
                     reason: labeled,
                 });
             }
-            GateDecision::Ask => {
-                let details = serde_json::to_string(&redacted).unwrap_or_default();
+            GateDecision::Ask(ask_reason) => {
+                let mut details_value = redacted.clone();
+                if let Some(why) = ask_reason {
+                    if let Value::Object(ref mut map) = details_value {
+                        map.insert("reason".to_string(), Value::String(why.clone()));
+                    }
+                }
+                let details = serde_json::to_string(&details_value).unwrap_or_default();
                 let approval_id = new_id("approval");
                 emit(
                     ctx,

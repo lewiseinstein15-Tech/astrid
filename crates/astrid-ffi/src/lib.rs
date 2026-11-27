@@ -19,6 +19,7 @@ mod store;
 use astrid::session::{HeadlessApproval, Session, TurnReport};
 use astrid_core::config::{AstridConfig, Profile, ProviderConfig, ProvidersConfig};
 use astrid_core::events::{Event, NarrationKind, TurnOutcome};
+use astrid_tools::GateDecision;
 use astrid_memory::protocol::PageSummary;
 use sha2::{Digest, Sha256};
 use std::net::ToSocketAddrs;
@@ -158,6 +159,8 @@ struct Core {
     /// a turn's tail events would otherwise sit in the mpsc queue until
     /// some later turn drove the runtime again.
     events: tokio::sync::broadcast::Receiver<Event>,
+    /// The agent sandbox folder (phase 5): shell commands run only inside it.
+    sandbox: PathBuf,
 }
 
 /// Entry object handed to Kotlin. One instance, owned by the app process.
@@ -166,6 +169,18 @@ pub struct Bridge {
     started_at_ms: u64,
     store: Option<Arc<Store>>,
     core: Mutex<Option<Core>>,
+    /// The pending direct-shell approval: (approval_id, command, why).
+    pending_shell: Mutex<Option<(String, String, String)>>,
+}
+
+/// One shell command's outcome on the direct FFI surface (phase 5).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ShellCommandRecord {
+    /// "ran" | "refused" | "needs_approval"
+    pub outcome: String,
+    pub output: String,
+    pub approval_id: String,
+    pub reason: String,
 }
 
 /// Map a core event to an audit-log (kind, text) row. Deltas are skipped:
@@ -364,6 +379,7 @@ impl Bridge {
             started_at_ms: now_ms(),
             store: None,
             core: Mutex::new(None),
+            pending_shell: Mutex::new(None),
         }
     }
 
@@ -379,13 +395,14 @@ impl Bridge {
             started_at_ms: now_ms(),
             store: Some(Arc::new(store)),
             core: Mutex::new(None),
+            pending_shell: Mutex::new(None),
         })
     }
 
     /// Bridge with the full core attached: the same session turn loop the
     /// TUI runs, plus the SQLite store. `data_dir` is app-private storage;
-    /// tools are confined to it; high-risk tool calls are denied headlessly
-    /// (approvals enforcement arrives in phase 9).
+    /// tools are confined to it; approvals are LIVE since phase 5: risky
+    /// shell commands ask first (popup or notification), read-only runs free.
     #[uniffi::constructor]
     pub fn with_core(db_path: String, data_dir: String) -> Result<Self, BridgeError> {
         let store = Store::open(&db_path).map_err(|e| BridgeError::Store { msg: e.to_string() })?;
@@ -396,6 +413,7 @@ impl Bridge {
             started_at_ms: now_ms(),
             store: Some(Arc::new(store)),
             core: Mutex::new(None),
+            pending_shell: Mutex::new(None),
         };
         bridge.attach_core(PathBuf::from(data_dir))?;
         Ok(bridge)
@@ -690,7 +708,7 @@ impl Bridge {
         Ok(())
     }
 
-    // ---- approval rules (persisted; enforcement lands in phase 9) ----------
+    // ---- approval rules (persisted; enforced live since phase 5) ----------
 
     pub fn rules(&self) -> Result<Vec<RuleRecord>, BridgeError> {
         let s = self.store.as_ref().ok_or(BridgeError::NoStore)?;
@@ -714,6 +732,200 @@ impl Bridge {
             self.append_event("rule.delete".into(), id.to_string())?;
         }
         Ok(ok)
+    }
+
+    // ---- phase 5: live approvals + the app-agent shell surface -------------
+
+    /// The agent sandbox folder shell commands are confined to.
+    pub fn sandbox_dir(&self) -> String {
+        self.with_core_ref(|core| core.sandbox.display().to_string())
+            .unwrap_or_default()
+    }
+
+    /// True while the core's turn loop waits on an approval decision
+    /// (BridgeApproval): the popup or the background notification must
+    /// answer with resolve_approval.
+    pub fn approval_pending(&self) -> bool {
+        self.with_core_ref(|core| core.session.approval_bridge.is_pending())
+            .unwrap_or(false)
+    }
+
+    /// Answer the pending turn-loop approval (the one the core asked via
+    /// Event::ApprovalRequested). Returns false when nothing was pending.
+    /// The registry emits approval.resolved either way; drain_audit lands
+    /// it in the Live trace.
+    pub fn resolve_approval(&self, approved: bool) -> bool {
+        self.with_core_ref(|core| core.session.approval_bridge.respond(approved))
+            .unwrap_or(false)
+    }
+
+    /// The app-agent shell surface (phase 5). Classifies exactly like the
+    /// shell_run tool: read-only runs free; the five approval patterns
+    /// (rm -rf, git push, git commit, git reset --hard, curl|sh) return
+    /// needs_approval and wait for resolve_shell; hard denies refuse; an
+    /// absolute path outside the sandbox folder is refused with a clear
+    /// error. Every decision lands in the audit log (Live trace).
+    pub fn shell_command(&self, command: String) -> Result<ShellCommandRecord, BridgeError> {
+        if self.store.is_none() {
+            return Err(BridgeError::NoStore);
+        }
+        let decision = astrid_tools::RiskGuard::refine(
+            "shell_run",
+            &serde_json::json!({ "command": command.clone() }),
+        );
+        let sandbox = self
+            .with_core_ref(|core| core.sandbox.clone())
+            .ok_or(BridgeError::NoCore)?;
+        match decision {
+            GateDecision::Deny(reason) => {
+                let _ = self.append_event("shell.refused".into(), format!("shell_run: {reason}"));
+                Ok(ShellCommandRecord {
+                    outcome: "refused".into(),
+                    output: String::new(),
+                    approval_id: String::new(),
+                    reason,
+                })
+            }
+            GateDecision::Ask(reason) => {
+                let approval_id = astrid_core::ids::new_id("approval");
+                let why = reason
+                    .unwrap_or_else(|| "this command needs your approval".to_string());
+                *self.pending_shell.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some((approval_id.clone(), command.clone(), why.clone()));
+                let _ = self.append_event(
+                    "shell.requested".into(),
+                    format!("shell_run[{approval_id}]: {command} — {why}"),
+                );
+                Ok(ShellCommandRecord {
+                    outcome: "needs_approval".into(),
+                    output: String::new(),
+                    approval_id,
+                    reason: why,
+                })
+            }
+            GateDecision::Allow => {
+                if let Err(reason) =
+                    astrid_tools::gate::shell_sandbox_guard(&command, &sandbox)
+                {
+                    let _ = self
+                        .append_event("shell.refused".into(), format!("shell_run: {reason}"));
+                    return Ok(ShellCommandRecord {
+                        outcome: "refused".into(),
+                        output: String::new(),
+                        approval_id: String::new(),
+                        reason,
+                    });
+                }
+                self.run_shell_in_sandbox(command)
+            }
+        }
+    }
+
+    /// Answer a pending direct-shell approval from shell_command. Deny
+    /// stops the command; Approve runs it in the sandbox folder.
+    pub fn resolve_shell(
+        &self,
+        approval_id: String,
+        approved: bool,
+    ) -> Result<ShellCommandRecord, BridgeError> {
+        let pending = self
+            .pending_shell
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        match pending {
+            Some((id, command, why)) if id == approval_id => {
+                if !approved {
+                    let _ = self.append_event(
+                        "shell.denied".into(),
+                        format!("shell_run: {command}"),
+                    );
+                    return Ok(ShellCommandRecord {
+                        outcome: "refused".into(),
+                        output: String::new(),
+                        approval_id,
+                        reason: format!("denied by you — {why}"),
+                    });
+                }
+                let _ = self.append_event(
+                    "shell.approved".into(),
+                    format!("shell_run: {command}"),
+                );
+                let sandbox = self
+                    .with_core_ref(|core| core.sandbox.clone())
+                    .ok_or(BridgeError::NoCore)?;
+                if let Err(reason) =
+                    astrid_tools::gate::shell_sandbox_guard(&command, &sandbox)
+                {
+                    let _ = self
+                        .append_event("shell.refused".into(), format!("shell_run: {reason}"));
+                    return Ok(ShellCommandRecord {
+                        outcome: "refused".into(),
+                        output: String::new(),
+                        approval_id,
+                        reason,
+                    });
+                }
+                self.run_shell_in_sandbox(command)
+            }
+            _ => Err(BridgeError::Io {
+                msg: "no such pending shell approval".into(),
+            }),
+        }
+    }
+
+    /// Run a command with cwd INSIDE the app sandbox folder. The core's
+    /// tokio runtime gives the same kill-on-timeout semantics the shell_run
+    /// tool has (30s hard cap).
+    fn run_shell_in_sandbox(&self, command: String) -> Result<ShellCommandRecord, BridgeError> {
+        let (output, exit_code) = self.core_call(|core| {
+            let sandbox = core.sandbox.clone();
+            core.rt.block_on(async {
+                use std::process::Stdio;
+                use tokio::process::Command;
+                let child = Command::new("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .current_dir(&sandbox)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true)
+                    .spawn()
+                    .map_err(|e| BridgeError::Io { msg: e.to_string() })?;
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    child.wait_with_output(),
+                )
+                .await
+                {
+                    Ok(Ok(o)) => {
+                        let code = o.status.code();
+                        let text = format!(
+                            "--- stdout ---\n{}\n--- stderr ---\n{}",
+                            String::from_utf8_lossy(&o.stdout),
+                            String::from_utf8_lossy(&o.stderr)
+                        );
+                        Ok::<(String, Option<i32>), BridgeError>((text, code))
+                    }
+                    Ok(Err(e)) => Err(BridgeError::Io { msg: e.to_string() }),
+                    Err(_) => Ok((
+                        "timed out after 30000ms (process killed)".to_string(),
+                        None,
+                    )),
+                }
+            })
+        })??;
+        let _ = self.append_event(
+            "shell.ran".into(),
+            format!("shell_run: {command} (exit {exit_code:?})"),
+        );
+        Ok(ShellCommandRecord {
+            outcome: "ran".into(),
+            output,
+            approval_id: String::new(),
+            reason: String::new(),
+        })
     }
 
     // ---- provider config (applied to the ladder on save) --------------------
@@ -1188,10 +1400,15 @@ impl Bridge {
             .build()
             .map_err(|e| BridgeError::Io { msg: e.to_string() })?;
 
+        // Phase 5: the agent sandbox folder — a dedicated directory under the
+        // app data dir. Shell commands run ONLY inside it (cwd + path guard).
+        let sandbox = data_dir.join("agent-sandbox");
+        std::fs::create_dir_all(&sandbox)
+            .map_err(|e| BridgeError::Io { msg: e.to_string() })?;
         let (session, events) = rt.block_on(Session::new(
             cfg,
-            data_dir.clone(),
-            Some(HeadlessApproval::Deny),
+            sandbox.clone(),
+            None, // live approvals: the popup / notification answers
         ))
         .map_err(|e| BridgeError::Io { msg: e.to_string() })?;
 
@@ -1205,6 +1422,7 @@ impl Bridge {
             session,
             data_dir,
             events,
+            sandbox,
         });
         Ok(())
     }

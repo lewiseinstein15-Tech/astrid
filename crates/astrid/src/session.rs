@@ -836,8 +836,13 @@ impl ApprovalSink for BridgeApproval {
         if !self.bridge.register(tx) {
             return false; // another approval pending — deny, never queue silently
         }
-        // details were already emitted as approval.requested by the registry
-        rx.await.unwrap_or(false)
+        // details were already emitted as approval.requested by the registry.
+        // Phase 5: if nobody answers within 120s (app killed, notification
+        // missed), the turn is denied instead of hanging forever.
+        match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+            Ok(Ok(decision)) => decision,
+            _ => false,
+        }
     }
 }
 
