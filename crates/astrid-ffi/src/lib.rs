@@ -1040,7 +1040,14 @@ impl Bridge {
             Some(s) => s.clone(),
             None => return,
         };
-        let mut guard = self.core.lock().unwrap_or_else(|e| e.into_inner());
+        // Non-blocking: core_call HOLDS the core mutex for the whole turn
+        // (a streaming turn can run for seconds). A UI poll of the audit log
+        // must never block behind it — the explicit post-turn drain lands
+        // those rows when the turn completes.
+        let mut guard = match self.core.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
         let core = match guard.as_mut() {
             Some(c) => c,
             None => return,
