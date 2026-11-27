@@ -48,7 +48,9 @@ import ai.astrid.app.R
 import ai.astrid.app.TurnService
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import uniffi.astrid_ffi.Bridge
 import uniffi.astrid_ffi.ChatMessageRecord
 import uniffi.astrid_ffi.EventRecord
@@ -147,14 +149,19 @@ fun ChatScreen(
         val text = pendingSend ?: return@LaunchedEffect
         sending = true
         val paths = attachments.map { it.path }
-        runCatching { bridge.sendMessageWithFiles(text, paths) }
-            .onSuccess { reply ->
-                // Phase 4: keep the honest fallback receipt from the reply.
-                fallbackReason = reply.fallbackReason
-            }
-            .onFailure { e ->
-                runCatching { bridge.appendEvent("chat.error", "${e::class.simpleName}: ${e.message}") }
-            }
+        // The bridge call blocks for the whole turn (Rust block_on + HTTP);
+        // on Dispatchers.Main it would freeze compose for the duration
+        // (AppNotIdleException, ANR on a device with a slow provider).
+        val outcome = withContext(Dispatchers.IO) {
+            runCatching { bridge.sendMessageWithFiles(text, paths) }
+        }
+        outcome.onSuccess { reply ->
+            // Phase 4: keep the honest fallback receipt from the reply.
+            fallbackReason = reply.fallbackReason
+        }
+        outcome.onFailure { e ->
+            runCatching { bridge.appendEvent("chat.error", "${e::class.simpleName}: ${e.message}") }
+        }
         attachments = emptyList()
         messages = loadMessages(bridge)
         sending = false

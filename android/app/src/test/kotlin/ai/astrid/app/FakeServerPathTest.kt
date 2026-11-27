@@ -51,26 +51,43 @@ class FakeServerPathTest {
 
         private fun serve(socket: Socket) {
             socket.use { s ->
-                val reader = s.getInputStream().bufferedReader()
+                // Content-Length counts BYTES, not chars: the core's system
+                // prompt carries multi-byte UTF-8 (em dashes, ≤ in tool
+                // descriptions), so a char-based read via InputStreamReader
+                // blocks forever waiting for chars that never arrive (the
+                // request body is complete; the client is awaiting our
+                // response). Read the head as raw bytes too — a
+                // BufferedReader would prefetch body bytes into its buffer.
+                val input = s.getInputStream()
+                val head = ArrayList<Byte>()
+                fun headEnds(): Boolean {
+                    val n = head.size
+                    return n >= 4 && head[n - 4] == 13.toByte() && head[n - 3] == 10.toByte() &&
+                        head[n - 2] == 13.toByte() && head[n - 1] == 10.toByte()
+                }
+                while (!headEnds()) {
+                    val b = input.read()
+                    if (b < 0) return
+                    head.add(b.toByte())
+                }
                 var contentLength = 0
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    if (line.isBlank()) break
+                for (line in String(head.toByteArray(), Charsets.ISO_8859_1).split("\r\n").drop(1)) {
                     if (line.startsWith("Content-Length:", ignoreCase = true)) {
                         contentLength = line.substringAfter(':').trim().toInt()
                     }
                 }
 
                 val out = s.getOutputStream()
+                var requestBody = ""
                 if (contentLength > 0) {
-                    val buf = CharArray(contentLength)
+                    val buf = ByteArray(contentLength)
                     var read = 0
                     while (read < contentLength) {
-                        val n = reader.read(buf, read, contentLength - read)
+                        val n = input.read(buf, read, contentLength - read)
                         if (n < 0) break
                         read += n
                     }
-                    val requestBody = String(buf, 0, read)
+                    requestBody = String(buf, 0, read, Charsets.UTF_8)
 
                     if (requestBody.contains("\"stream\":true")) {
                         // The core's agent turn streams (SSE). Answer the way

@@ -68,6 +68,11 @@ class AstridUiTest {
         // ladder (the built-in rungs are real network endpoints).
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         AstridBridge.init(context.filesDir)
+        // FakeServerPathTest configures a 'fake' provider on the shared
+        // bridge singleton and runs before this class (alphabetical test
+        // order); clear the provider config so the composer chip falls back
+        // to the built-in kilo-auto/free label.
+        runCatching { bridge.setProvider("offline", "", "", "") }
         runCatching { bridge.setLadder(listOf("offline")) }
     }
 
