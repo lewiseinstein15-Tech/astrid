@@ -25,7 +25,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import uniffi.astrid_ffi.Bridge
 import uniffi.astrid_ffi.EventRecord
 
@@ -106,7 +108,15 @@ fun ApprovalHost(bridge: Bridge) {
 
     LaunchedEffect(Unit) {
         while (true) {
-            pending = runCatching { derivePendingApproval(bridge) }.getOrNull()
+            // A null poll must not tear the popup down mid-frame: while an
+            // approval is unresolved the popup stays until it is resolved
+            // (the resolver sets pending = null itself). The FFI call takes
+            // the core mutex — keep it OFF the main thread (the compose test
+            // suite freezes otherwise, same reason the send moved off Main).
+            val next = withContext(Dispatchers.IO) {
+                runCatching { derivePendingApproval(bridge) }.getOrNull()
+            }
+            if (next != null) pending = next
             delay(400)
         }
     }
