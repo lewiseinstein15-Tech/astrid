@@ -132,9 +132,14 @@ fun ChatScreen(
     // the last turn (null when the first rung served).
     var fallbackReason by remember { mutableStateOf<String?>(null) }
     // Phase 4: long turns promote to a foreground service. The rationale is
-    // asked once per session; a decline means never promote this session.
-    var rationaleAsked by remember { mutableStateOf(false) }
-    var rationaleAccepted by remember { mutableStateOf(false) }
+    // asked once EVER — a per-composition flag re-popped the dialog on every
+    // app start, blocking the screen mid-turn (the v0.1.5 complaint). The
+    // choice survives restarts; clear the app data to be asked again.
+    val uiPrefs = remember {
+        context.getSharedPreferences("astrid-ui", android.content.Context.MODE_PRIVATE)
+    }
+    var rationaleAsked by remember { mutableStateOf(uiPrefs.getBoolean("turn_rationale_ack", false)) }
+    var rationaleAccepted by remember { mutableStateOf(uiPrefs.getBoolean("turn_rationale_accept", false)) }
     var servicePromoted by remember { mutableStateOf(false) }
     var showTurnRationale by remember { mutableStateOf(false) }
 
@@ -191,7 +196,7 @@ fun ChatScreen(
         when {
             !rationaleAsked -> showTurnRationale = true
             rationaleAccepted -> {
-                TurnService.start(context)
+                runCatching { TurnService.start(context) }
                 servicePromoted = true
             }
         }
@@ -412,17 +417,21 @@ fun ChatScreen(
         TurnRationaleDialog(
             onAccept = {
                 showTurnRationale = false
+                uiPrefs.edit().putBoolean("turn_rationale_ack", true)
+                    .putBoolean("turn_rationale_accept", true).apply()
                 rationaleAsked = true
                 rationaleAccepted = true
                 // The turn that triggered the dialog is usually still running;
                 // promote now. Later turns promote without asking again.
                 if (sending) {
-                    TurnService.start(context)
+                    runCatching { TurnService.start(context) }
                     servicePromoted = true
                 }
             },
             onDecline = {
                 showTurnRationale = false
+                uiPrefs.edit().putBoolean("turn_rationale_ack", true)
+                    .putBoolean("turn_rationale_accept", false).apply()
                 rationaleAsked = true
                 rationaleAccepted = false
             }

@@ -687,6 +687,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_approval_pending(
     ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_approval_request(
+    ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_chat_sessions(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_connectors(
@@ -809,6 +811,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_approval_pending(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    external fun uniffi_astrid_ffi_fn_method_bridge_approval_request(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_chat_sessions(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_connectors(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1018,6 +1022,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_approval_pending() and 0xFFFF) != 31473) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_approval_request() and 0xFFFF) != 50972) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_chat_sessions() and 0xFFFF) != 45533) {
@@ -1564,6 +1571,12 @@ public interface BridgeInterface {
      */
     fun `approvalPending`(): kotlin.Boolean
     
+    /**
+     * The waiting request's kind + details, straight from the approval
+     * bridge — the popup shows it while the turn is still running.
+     */
+    fun `approvalRequest`(): ApprovalRequest?
+    
     fun `chatSessions`(): List<ChatSessionRecord>
     
     fun `connectors`(): List<ConnectorRecord>
@@ -1918,6 +1931,23 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_astrid_ffi_fn_method_bridge_approval_pending(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The waiting request's kind + details, straight from the approval
+     * bridge — the popup shows it while the turn is still running.
+     */override fun `approvalRequest`(): ApprovalRequest? {
+            return FfiConverterOptionalTypeApprovalRequest.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_approval_request(
         it,
         _status)
 }
@@ -2714,6 +2744,53 @@ public object FfiConverterTypeAppInfo: FfiConverterRustBuffer<AppInfo> {
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`version`, buf)
             FfiConverterString.write(value.`tagline`, buf)
+    }
+}
+
+
+
+/**
+ * The waiting turn-loop approval, for the live popup (phase 5.1).
+ */
+data class ApprovalRequest (
+    /**
+     * "turn" for the tool-call flow.
+     */
+    var `kind`: kotlin.String
+    , 
+    /**
+     * The registry's details JSON (command / path / reason...).
+     */
+    var `details`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeApprovalRequest: FfiConverterRustBuffer<ApprovalRequest> {
+    override fun read(buf: ByteBuffer): ApprovalRequest {
+        return ApprovalRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ApprovalRequest) = (
+            FfiConverterString.allocationSize(value.`kind`) +
+            FfiConverterString.allocationSize(value.`details`)
+    )
+
+    override fun write(value: ApprovalRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`kind`, buf)
+            FfiConverterString.write(value.`details`, buf)
     }
 }
 
@@ -3752,6 +3829,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeApprovalRequest: FfiConverterRustBuffer<ApprovalRequest?> {
+    override fun read(buf: ByteBuffer): ApprovalRequest? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeApprovalRequest.read(buf)
+    }
+
+    override fun allocationSize(value: ApprovalRequest?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeApprovalRequest.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ApprovalRequest?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeApprovalRequest.write(value, buf)
         }
     }
 }

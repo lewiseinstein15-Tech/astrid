@@ -66,21 +66,24 @@ private fun shellRowWhy(text: String): String = text.substringAfter(" — ", "")
  * unanswered shell.requested row. Returns null when nothing is waiting.
  */
 fun derivePendingApproval(bridge: Bridge): ApprovalPending? {
-    val events: List<EventRecord> =
-        runCatching { bridge.recentEvents(30u) }.getOrDefault(emptyList())
-    val folder = runCatching { bridge.sandboxDir() }.getOrDefault("")
-    if (runCatching { bridge.approvalPending() }.getOrDefault(false)) {
-        val ask = events.firstOrNull { it.kind == "approval.requested" }
-            ?: return ApprovalPending("turn", "", "the agent is waiting for your decision", "", folder)
-        val details = ask.text.substringAfter(": ", "")
+    // The turn loop holds the core mutex for its whole run (approval waits
+    // included), so the request MUST come from the lock-free approval bridge:
+    // an event-based derive can neither see the pending flag (the old read
+    // blocked until the turn ended — the v0.1.5 hang) nor read the audit row
+    // (the quick drain is skipped while the turn holds the mutex).
+    runCatching { bridge.approvalRequest() }.getOrNull()?.let { req ->
+        val folder = runCatching { bridge.sandboxDir() }.getOrDefault("")
         return ApprovalPending(
-            kind = "turn",
-            command = commandFromDetails(details),
-            why = reasonFromDetails(details).ifEmpty { "the agent is waiting for your decision" },
+            kind = req.kind,
+            command = commandFromDetails(req.details),
+            why = reasonFromDetails(req.details).ifEmpty { "the agent is waiting for your decision" },
             approvalId = "",
             folder = folder,
         )
     }
+    val events: List<EventRecord> =
+        runCatching { bridge.recentEvents(30u) }.getOrDefault(emptyList())
+    val folder = runCatching { bridge.sandboxDir() }.getOrDefault("")
     val newestResolvedIdx = events.indexOfFirst { it.kind in RESOLVED_KINDS }
     val ask = events.firstOrNull { it.kind == "shell.requested" } ?: return null
     // newest-first: if the ask is older than the newest resolution, it is done.
