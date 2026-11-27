@@ -16,6 +16,8 @@ object AstridBridge {
     lateinit var bridge: Bridge
         private set
 
+    fun isReady() = ::bridge.isInitialized
+
     fun init(filesDir: java.io.File) {
         if (::bridge.isInitialized) return
         // The event log + chat store live in app-private storage; the paths

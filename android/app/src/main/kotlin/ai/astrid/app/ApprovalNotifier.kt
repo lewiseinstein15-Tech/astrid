@@ -36,7 +36,7 @@ object ApprovalNotifier {
     }
 
     fun maybeNotify(context: Context) {
-        val bridge = if (::AstridBridge.bridge.isInitialized) AstridBridge.bridge else return
+        val bridge = if (AstridBridge.isReady()) AstridBridge.bridge else return
         val pending = runCatching { ai.astrid.app.ui.derivePendingApproval(bridge) }.getOrNull() ?: return
         ensureChannel(context)
         fun decideIntent(approved: Boolean): PendingIntent =
@@ -73,7 +73,7 @@ object ApprovalNotifier {
 class ApprovalReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ApprovalNotifier.ACTION_DECIDE) return
-        val bridge = if (::AstridBridge.bridge.isInitialized) AstridBridge.bridge else return
+        val bridge = if (AstridBridge.isReady()) AstridBridge.bridge else return
         val approved = intent.getBooleanExtra(ApprovalNotifier.EXTRA_APPROVED, false)
         val kind = intent.getStringExtra(ApprovalNotifier.EXTRA_KIND) ?: "turn"
         val id = intent.getStringExtra(ApprovalNotifier.EXTRA_ID) ?: ""

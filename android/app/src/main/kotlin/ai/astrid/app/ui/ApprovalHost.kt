@@ -115,7 +115,7 @@ fun ApprovalHost(bridge: Bridge) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(scrimMedium)
+            .background(Bg.copy(alpha = 0.55f))
             .clickable(enabled = false) { /* the decision is required */ },
         contentAlignment = Alignment.Center
     ) {
