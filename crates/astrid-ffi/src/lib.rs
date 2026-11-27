@@ -169,8 +169,22 @@ pub struct Bridge {
     started_at_ms: u64,
     store: Option<Arc<Store>>,
     core: Mutex<Option<Core>>,
+    /// The session's approval bridge, cloned out of the core: approval reads
+    /// and answers must work WHILE the turn loop holds the core mutex (it
+    /// holds it for the whole turn, approval waits included — a locking read
+    /// would never see the pending request and the popup would never show).
+    approvals: Mutex<Option<Arc<astrid_tui::ApprovalBridge>>>,
     /// The pending direct-shell approval: (approval_id, command, why).
     pending_shell: Mutex<Option<(String, String, String)>>,
+}
+
+/// The waiting turn-loop approval, for the live popup (phase 5.1).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ApprovalRequest {
+    /// "turn" for the tool-call flow.
+    pub kind: String,
+    /// The registry's details JSON (command / path / reason...).
+    pub details: String,
 }
 
 /// One shell command's outcome on the direct FFI surface (phase 5).
@@ -379,6 +393,7 @@ impl Bridge {
             started_at_ms: now_ms(),
             store: None,
             core: Mutex::new(None),
+            approvals: Mutex::new(None),
             pending_shell: Mutex::new(None),
         }
     }
@@ -395,6 +410,7 @@ impl Bridge {
             started_at_ms: now_ms(),
             store: Some(Arc::new(store)),
             core: Mutex::new(None),
+            approvals: Mutex::new(None),
             pending_shell: Mutex::new(None),
         })
     }
@@ -413,6 +429,7 @@ impl Bridge {
             started_at_ms: now_ms(),
             store: Some(Arc::new(store)),
             core: Mutex::new(None),
+            approvals: Mutex::new(None),
             pending_shell: Mutex::new(None),
         };
         bridge.attach_core(PathBuf::from(data_dir))?;
@@ -746,8 +763,26 @@ impl Bridge {
     /// (BridgeApproval): the popup or the background notification must
     /// answer with resolve_approval.
     pub fn approval_pending(&self) -> bool {
-        self.with_core_ref(|core| core.session.approval_bridge.is_pending())
+        // Lock-free by design: the turn loop holds the core mutex for its
+        // whole run — a locking read would block until the turn ends and
+        // never report the pending approval (the v0.1.5 ANR + hang).
+        self.approvals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|b| b.is_pending())
             .unwrap_or(false)
+    }
+
+    /// The waiting request's kind + details, straight from the approval
+    /// bridge — the popup shows it while the turn is still running.
+    pub fn approval_request(&self) -> Option<ApprovalRequest> {
+        self.approvals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|b| b.pending_request())
+            .map(|(kind, details)| ApprovalRequest { kind, details })
     }
 
     /// Answer the pending turn-loop approval (the one the core asked via
@@ -755,7 +790,13 @@ impl Bridge {
     /// The registry emits approval.resolved either way; drain_audit lands
     /// it in the Live trace.
     pub fn resolve_approval(&self, approved: bool) -> bool {
-        self.with_core_ref(|core| core.session.approval_bridge.respond(approved))
+        // Lock-free (see approval_pending): the answer must reach the waiting
+        // turn loop without touching the mutex the loop itself holds.
+        self.approvals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|b| b.respond(approved))
             .unwrap_or(false)
     }
 
@@ -1412,6 +1453,13 @@ impl Bridge {
         ))
         .map_err(|e| BridgeError::Io { msg: e.to_string() })?;
 
+        // The approval bridge, reachable WITHOUT the core mutex (see the
+        // field comment): the popup derives the request mid-turn from here.
+        *self
+            .approvals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(session.approval_bridge.clone());
+
         // The event receiver lives on the Core and is drained synchronously
         // (drain_audit): after every turn and before every audit read.
         *self
@@ -1463,6 +1511,49 @@ mod tests {
         let b = Bridge::new();
         assert!(b.greeting().contains(env!("ASTRID_VERSION")));
     }
+    #[test]
+    fn approval_reads_answer_while_the_turn_holds_the_core_mutex() {
+        // The v0.1.5 regression: approval_pending/resolve went through the
+        // core mutex, which the turn loop holds for its whole run — the popup
+        // could neither see nor answer a mid-turn approval, the request sat
+        // out its 120s timeout, and MainActivity's onPause read froze the
+        // main thread (ANR). The surface must work with the mutex HELD.
+        let dir = std::env::temp_dir().join(format!("astrid-ffi-approval-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let b = Bridge::with_core(
+            dir.join("astrid.db").to_string_lossy().to_string(),
+            dir.join("core").to_string_lossy().to_string(),
+        )
+        .unwrap();
+        // A request arrives mid-turn: registered on the approval bridge while
+        // "the turn loop" (here: this test) holds the core mutex.
+        let approvals = b
+            .approvals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .unwrap()
+            .clone();
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        assert!(approvals.register("turn", "{\"tool\":\"shell_run\",\"command\":\"rm -rf x\"}", tx));
+        // Hold the core mutex exactly like a running turn does.
+        let core_guard = b.core.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(b.approval_pending(), "pending must be visible with the mutex held");
+        let req = b
+            .approval_request()
+            .expect("details must be readable with the mutex held");
+        assert_eq!(req.kind, "turn");
+        assert!(req.details.contains("rm -rf"));
+        assert!(
+            b.resolve_approval(false),
+            "the answer must reach the waiting turn with the mutex held"
+        );
+        assert!(!b.approval_pending());
+        drop(core_guard);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
 
     #[test]
     fn uptime_is_small_and_monotonic() {

@@ -6,9 +6,18 @@
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
+/// One waiting approval: the responder plus what the popup must show. The
+/// kind + details ride ON the bridge (not on the audit stream) so the UI can
+/// derive the popup while the turn loop holds the core mutex.
+pub struct PendingApproval {
+    tx: oneshot::Sender<bool>,
+    kind: String,
+    details: String,
+}
+
 #[derive(Default)]
 pub struct ApprovalBridge {
-    pending: Mutex<Option<oneshot::Sender<bool>>>,
+    pending: Mutex<Option<PendingApproval>>,
 }
 
 impl ApprovalBridge {
@@ -18,7 +27,7 @@ impl ApprovalBridge {
 
     /// Register a responder for a new approval. Returns false if another
     /// approval is already pending (caller must deny).
-    pub fn register(&self, tx: oneshot::Sender<bool>) -> bool {
+    pub fn register(&self, kind: &str, details: &str, tx: oneshot::Sender<bool>) -> bool {
         let mut guard = match self.pending.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
@@ -26,8 +35,24 @@ impl ApprovalBridge {
         if guard.is_some() {
             return false;
         }
-        *guard = Some(tx);
+        *guard = Some(PendingApproval {
+            tx,
+            kind: kind.to_string(),
+            details: details.to_string(),
+        });
         true
+    }
+
+    /// The waiting request's (kind, details) for the popup — instant, no
+    /// core mutex involved.
+    pub fn pending_request(&self) -> Option<(String, String)> {
+        let guard = match self.pending.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard
+            .as_ref()
+            .map(|p| (p.kind.clone(), p.details.clone()))
     }
 
     /// Answer the pending approval. Returns false if nothing was pending.
@@ -37,8 +62,8 @@ impl ApprovalBridge {
             Err(poisoned) => poisoned.into_inner(),
         };
         match guard.take() {
-            Some(tx) => {
-                let _ = tx.send(approved);
+            Some(p) => {
+                let _ = p.tx.send(approved);
                 true
             }
             None => false,
@@ -61,10 +86,14 @@ mod tests {
     async fn single_pending_approval() {
         let bridge = ApprovalBridge::new();
         let (tx, rx) = oneshot::channel();
-        assert!(bridge.register(tx));
+        assert!(bridge.register("turn", "{\"command\":\"rm -rf x\"}", tx));
+        assert_eq!(
+            bridge.pending_request(),
+            Some(("turn".into(), "{\"command\":\"rm -rf x\"}".into()))
+        );
         // second registration must fail
         let (tx2, _rx2) = oneshot::channel();
-        assert!(!bridge.register(tx2));
+        assert!(!bridge.register("turn", "{}", tx2));
         assert!(bridge.respond(true));
         assert_eq!(rx.await.unwrap(), true);
         assert!(!bridge.is_pending());

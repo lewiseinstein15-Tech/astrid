@@ -831,9 +831,9 @@ struct BridgeApproval {
 }
 #[async_trait::async_trait]
 impl ApprovalSink for BridgeApproval {
-    async fn request(&self, _tool: &str, _details: &str) -> bool {
+    async fn request(&self, _tool: &str, details: &str) -> bool {
         let (tx, rx) = oneshot::channel();
-        if !self.bridge.register(tx) {
+        if !self.bridge.register("turn", details, tx) {
             return false; // another approval pending — deny, never queue silently
         }
         // details were already emitted as approval.requested by the registry.
