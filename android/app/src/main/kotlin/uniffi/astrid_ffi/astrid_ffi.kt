@@ -685,6 +685,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_append_event(
     ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_approval_pending(
+    ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_chat_sessions(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_connectors(
@@ -727,7 +729,15 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_remember(
     ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_resolve_approval(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_resolve_shell(
+    ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_rules(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_run_shell_in_sandbox(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_sandbox_dir(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_send_message(
     ): Int
@@ -740,6 +750,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_astrid_ffi_checksum_method_bridge_set_provider(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_set_task_enabled(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_shell_command(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_skills(
     ): Int
@@ -795,6 +807,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_append_event(`ptr`: Long,`kind`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_approval_pending(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     external fun uniffi_astrid_ffi_fn_method_bridge_chat_sessions(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_connectors(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -837,7 +851,15 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_remember(`ptr`: Long,`topic`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_resolve_approval(`ptr`: Long,`approved`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_astrid_ffi_fn_method_bridge_resolve_shell(`ptr`: Long,`approvalId`: RustBuffer.ByValue,`approved`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_rules(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_run_shell_in_sandbox(`ptr`: Long,`command`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_sandbox_dir(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_send_message(`ptr`: Long,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -851,6 +873,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_set_task_enabled(`ptr`: Long,`id`: Long,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_astrid_ffi_fn_method_bridge_shell_command(`ptr`: Long,`command`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_skills(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_tasks(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -993,6 +1017,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_append_event() and 0xFFFF) != 56640) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_approval_pending() and 0xFFFF) != 31473) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_chat_sessions() and 0xFFFF) != 45533) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1056,7 +1083,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_remember() and 0xFFFF) != 10427) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_resolve_approval() and 0xFFFF) != 26762) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_resolve_shell() and 0xFFFF) != 324) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_rules() and 0xFFFF) != 21776) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_run_shell_in_sandbox() and 0xFFFF) != 34159) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_sandbox_dir() and 0xFFFF) != 31589) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_send_message() and 0xFFFF) != 22732) {
@@ -1077,6 +1116,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_task_enabled() and 0xFFFF) != 48117) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_shell_command() and 0xFFFF) != 46055) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_skills() and 0xFFFF) != 24796) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1092,7 +1134,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_constructor_bridge_new() and 0xFFFF) != 36568) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_astrid_ffi_checksum_constructor_bridge_with_core() and 0xFFFF) != 58654) {
+    if ((lib.uniffi_astrid_ffi_checksum_constructor_bridge_with_core() and 0xFFFF) != 42395) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_constructor_bridge_with_store() and 0xFFFF) != 6532) {
@@ -1515,6 +1557,13 @@ public interface BridgeInterface {
     
     fun `appendEvent`(`kind`: kotlin.String, `text`: kotlin.String): EventRecord
     
+    /**
+     * True while the core's turn loop waits on an approval decision
+     * (BridgeApproval): the popup or the background notification must
+     * answer with resolve_approval.
+     */
+    fun `approvalPending`(): kotlin.Boolean
+    
     fun `chatSessions`(): List<ChatSessionRecord>
     
     fun `connectors`(): List<ConnectorRecord>
@@ -1584,7 +1633,33 @@ public interface BridgeInterface {
     
     fun `remember`(`topic`: kotlin.String, `body`: kotlin.String): kotlin.String
     
+    /**
+     * Answer the pending turn-loop approval (the one the core asked via
+     * Event::ApprovalRequested). Returns false when nothing was pending.
+     * The registry emits approval.resolved either way; drain_audit lands
+     * it in the Live trace.
+     */
+    fun `resolveApproval`(`approved`: kotlin.Boolean): kotlin.Boolean
+    
+    /**
+     * Answer a pending direct-shell approval from shell_command. Deny
+     * stops the command; Approve runs it in the sandbox folder.
+     */
+    fun `resolveShell`(`approvalId`: kotlin.String, `approved`: kotlin.Boolean): ShellCommandRecord
+    
     fun `rules`(): List<RuleRecord>
+    
+    /**
+     * Run a command with cwd INSIDE the app sandbox folder. The core's
+     * tokio runtime gives the same kill-on-timeout semantics the shell_run
+     * tool has (30s hard cap).
+     */
+    fun `runShellInSandbox`(`command`: kotlin.String): ShellCommandRecord
+    
+    /**
+     * The agent sandbox folder shell commands are confined to.
+     */
+    fun `sandboxDir`(): kotlin.String
     
     /**
      * Run a REAL turn through the core and persist both sides of the
@@ -1621,6 +1696,16 @@ public interface BridgeInterface {
     fun `setProvider`(`name`: kotlin.String, `baseUrl`: kotlin.String, `apiKey`: kotlin.String, `model`: kotlin.String): ProviderRecord
     
     fun `setTaskEnabled`(`id`: kotlin.Long, `enabled`: kotlin.Boolean)
+    
+    /**
+     * The app-agent shell surface (phase 5). Classifies exactly like the
+     * shell_run tool: read-only runs free; the five approval patterns
+     * (rm -rf, git push, git commit, git reset --hard, curl|sh) return
+     * needs_approval and wait for resolve_shell; hard denies refuse; an
+     * absolute path outside the sandbox folder is refused with a clear
+     * error. Every decision lands in the audit log (Live trace).
+     */
+    fun `shellCommand`(`command`: kotlin.String): ShellCommandRecord
     
     fun `skills`(): List<SkillRecord>
     
@@ -1817,6 +1902,24 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
         
         FfiConverterString.lower(`kind`),
         FfiConverterString.lower(`text`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * True while the core's turn loop waits on an approval decision
+     * (BridgeApproval): the popup or the background notification must
+     * answer with resolve_approval.
+     */override fun `approvalPending`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_approval_pending(
+        it,
+        _status)
 }
     }
     )
@@ -2153,11 +2256,87 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     
 
     
+    /**
+     * Answer the pending turn-loop approval (the one the core asked via
+     * Event::ApprovalRequested). Returns false when nothing was pending.
+     * The registry emits approval.resolved either way; drain_audit lands
+     * it in the Live trace.
+     */override fun `resolveApproval`(`approved`: kotlin.Boolean): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_resolve_approval(
+        it,
+        
+        FfiConverterBoolean.lower(`approved`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Answer a pending direct-shell approval from shell_command. Deny
+     * stops the command; Approve runs it in the sandbox folder.
+     */
+    @Throws(BridgeException::class)override fun `resolveShell`(`approvalId`: kotlin.String, `approved`: kotlin.Boolean): ShellCommandRecord {
+            return FfiConverterTypeShellCommandRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_resolve_shell(
+        it,
+        
+        FfiConverterString.lower(`approvalId`),
+        FfiConverterBoolean.lower(`approved`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(BridgeException::class)override fun `rules`(): List<RuleRecord> {
             return FfiConverterSequenceTypeRuleRecord.lift(
     callWithHandle {
     uniffiRustCallWithError(BridgeException) { _status ->
     UniffiLib.uniffi_astrid_ffi_fn_method_bridge_rules(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Run a command with cwd INSIDE the app sandbox folder. The core's
+     * tokio runtime gives the same kill-on-timeout semantics the shell_run
+     * tool has (30s hard cap).
+     */
+    @Throws(BridgeException::class)override fun `runShellInSandbox`(`command`: kotlin.String): ShellCommandRecord {
+            return FfiConverterTypeShellCommandRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_run_shell_in_sandbox(
+        it,
+        
+        FfiConverterString.lower(`command`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The agent sandbox folder shell commands are confined to.
+     */override fun `sandboxDir`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_sandbox_dir(
         it,
         _status)
 }
@@ -2285,6 +2464,29 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     
 
     
+    /**
+     * The app-agent shell surface (phase 5). Classifies exactly like the
+     * shell_run tool: read-only runs free; the five approval patterns
+     * (rm -rf, git push, git commit, git reset --hard, curl|sh) return
+     * needs_approval and wait for resolve_shell; hard denies refuse; an
+     * absolute path outside the sandbox folder is refused with a clear
+     * error. Every decision lands in the audit log (Live trace).
+     */
+    @Throws(BridgeException::class)override fun `shellCommand`(`command`: kotlin.String): ShellCommandRecord {
+            return FfiConverterTypeShellCommandRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_shell_command(
+        it,
+        
+        FfiConverterString.lower(`command`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(BridgeException::class)override fun `skills`(): List<SkillRecord> {
             return FfiConverterSequenceTypeSkillRecord.lift(
     callWithHandle {
@@ -2350,8 +2552,8 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     /**
      * Bridge with the full core attached: the same session turn loop the
      * TUI runs, plus the SQLite store. `data_dir` is app-private storage;
-     * tools are confined to it; high-risk tool calls are denied headlessly
-     * (approvals enforcement arrives in phase 9).
+     * tools are confined to it; approvals are LIVE since phase 5: risky
+     * shell commands ask first (popup or notification), read-only runs free.
      */
     @Throws(BridgeException::class) fun `withCore`(`dbPath`: kotlin.String, `dataDir`: kotlin.String): Bridge {
             return FfiConverterTypeBridge.lift(
@@ -3140,6 +3342,60 @@ public object FfiConverterTypeRuleRecord: FfiConverterRustBuffer<RuleRecord> {
             FfiConverterString.write(value.`pattern`, buf)
             FfiConverterString.write(value.`decision`, buf)
             FfiConverterULong.write(value.`createdAt`, buf)
+    }
+}
+
+
+
+/**
+ * One shell command's outcome on the direct FFI surface (phase 5).
+ */
+data class ShellCommandRecord (
+    /**
+     * "ran" | "refused" | "needs_approval"
+     */
+    var `outcome`: kotlin.String
+    , 
+    var `output`: kotlin.String
+    , 
+    var `approvalId`: kotlin.String
+    , 
+    var `reason`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeShellCommandRecord: FfiConverterRustBuffer<ShellCommandRecord> {
+    override fun read(buf: ByteBuffer): ShellCommandRecord {
+        return ShellCommandRecord(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ShellCommandRecord) = (
+            FfiConverterString.allocationSize(value.`outcome`) +
+            FfiConverterString.allocationSize(value.`output`) +
+            FfiConverterString.allocationSize(value.`approvalId`) +
+            FfiConverterString.allocationSize(value.`reason`)
+    )
+
+    override fun write(value: ShellCommandRecord, buf: ByteBuffer) {
+            FfiConverterString.write(value.`outcome`, buf)
+            FfiConverterString.write(value.`output`, buf)
+            FfiConverterString.write(value.`approvalId`, buf)
+            FfiConverterString.write(value.`reason`, buf)
     }
 }
 
