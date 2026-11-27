@@ -68,9 +68,9 @@ class ApprovalFlowTest {
         compose.onNodeWithTag("approval/approve").assertIsDisplayed()
         compose.onNodeWithText("Approval needed").assertIsDisplayed()
         // The popup carries the command, the sandbox folder and the why.
-        compose.onNodeWithTag("approval/command").assertIsDisplayed()
-        compose.onNodeWithTag("approval/folder").assertIsDisplayed()
-        compose.onNodeWithTag("approval/why").assertIsDisplayed()
+        compose.onNodeWithTag("approval/command", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("approval/folder", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("approval/why", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
