@@ -152,6 +152,12 @@ struct Core {
     rt: tokio::runtime::Runtime,
     session: Arc<Session>,
     data_dir: PathBuf,
+    /// Broadcast receiver for core events. Drained synchronously into the
+    /// audit log: events travel session → mpsc → the eventlog pump task →
+    /// broadcast, and that pump only runs while the runtime is driven, so
+    /// a turn's tail events would otherwise sit in the mpsc queue until
+    /// some later turn drove the runtime again.
+    events: tokio::sync::broadcast::Receiver<Event>,
 }
 
 /// Entry object handed to Kotlin. One instance, owned by the app process.
@@ -424,6 +430,9 @@ impl Bridge {
     }
 
     pub fn recent_events(&self, limit: u32) -> Result<Vec<EventRecord>, BridgeError> {
+        // Drain before reading: the reader must see the tail of the last
+        // turn, not whatever made it through before the runtime parked.
+        self.drain_audit();
         let s = self.store.as_ref().ok_or(BridgeError::NoStore)?;
         map_store(s.recent(limit))
     }
@@ -508,6 +517,9 @@ impl Bridge {
                 report.fallback_reason,
             ))
         })??;
+        // The turn is over: drain its receipt stream now, so the caller
+        // sees the whole turn in the Live trace the moment this returns.
+        self.drain_audit();
         map_store(s.insert_message(session_id, "assistant", &answer, &provider))?;
         Ok(TurnReply {
             reply: answer,
@@ -1018,6 +1030,53 @@ impl Bridge {
         guard.as_ref().map(f)
     }
 
+    /// Synchronously drain the core's event stream into the audit log (the
+    /// Live trace screen). The eventlog pump task only runs while the
+    /// runtime is driven, so this block_on-drives it in short windows until
+    /// the stream is quiet, appending every receipt to the store — a turn's
+    /// rows are visible the moment the turn or the next audit read returns.
+    fn drain_audit(&self) {
+        let store = match self.store.as_ref() {
+            Some(s) => s.clone(),
+            None => return,
+        };
+        let mut guard = self.core.lock().unwrap_or_else(|e| e.into_inner());
+        let core = match guard.as_mut() {
+            Some(c) => c,
+            None => return,
+        };
+        let started = std::time::Instant::now();
+        let mut quiet_windows = 0u32;
+        core.rt.block_on(async {
+            loop {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(20),
+                    core.events.recv(),
+                )
+                .await
+                {
+                    Ok(Ok(event)) => {
+                        quiet_windows = 0;
+                        if let Some((kind, text)) = event_row(&event) {
+                            let _ = store.append(&kind, &text);
+                        }
+                    }
+                    Ok(Err(_)) => break, // sender dropped: stream closed
+                    Err(_) => {
+                        // A quiet 20 ms window; two in a row means the
+                        // mpsc → broadcast pipeline is fully flushed.
+                        quiet_windows += 1;
+                        if quiet_windows >= 2
+                            || started.elapsed() > std::time::Duration::from_millis(200)
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     fn active_session(&self, s: &Store) -> Result<i64, BridgeError> {
         if let Some(id) = map_store(s.kv_get(ACTIVE_SESSION_KV))? {
             if let Ok(id) = id.parse::<i64>() {
@@ -1088,33 +1147,24 @@ impl Bridge {
             .build()
             .map_err(|e| BridgeError::Io { msg: e.to_string() })?;
 
-        let (session, mut events) = rt.block_on(Session::new(
+        let (session, events) = rt.block_on(Session::new(
             cfg,
             data_dir.clone(),
             Some(HeadlessApproval::Deny),
         ))
         .map_err(|e| BridgeError::Io { msg: e.to_string() })?;
 
-        // Drain core events into the audit log for the Live trace screen.
-        let store = self.store.clone().ok_or(BridgeError::NoStore)?;
-        rt.spawn(async move {
-            loop {
-                match events.recv().await {
-                    Ok(event) => {
-                        if let Some((kind, text)) = event_row(&event) {
-                            let _ = store.append(&kind, &text);
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(_) => break,
-                }
-            }
-        });
-
+        // The event receiver lives on the Core and is drained synchronously
+        // (drain_audit): after every turn and before every audit read.
         *self
             .core
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(Core { rt, session, data_dir });
+            .unwrap_or_else(|e| e.into_inner()) = Some(Core {
+            rt,
+            session,
+            data_dir,
+            events,
+        });
         Ok(())
     }
 }
@@ -1288,5 +1338,25 @@ mod tests {
         assert!(!agents.is_empty(), "bundled roster must be non-empty");
         let skills = b.skills().expect("skills");
         assert!(!skills.is_empty(), "bundled skills must be non-empty");
+    }
+
+    #[test]
+    fn a_turns_audit_rows_are_visible_the_moment_send_returns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("astrid.db").to_string_lossy().into_owned();
+        let data = dir.path().join("data").to_string_lossy().into_owned();
+        let b = Bridge::with_core(db, data).expect("bridge with core");
+
+        let reply = b.send_message("hi".into()).expect("offline turn");
+        assert!(!reply.reply.is_empty());
+
+        // The tail of the turn (turn.completed and the final narrations)
+        // must be in the audit log the moment send_message returns — no
+        // later turn or pump tick required.
+        let rows = b.recent_events(100u32).expect("rows");
+        assert!(
+            rows.iter().any(|r| r.kind == "turn.completed"),
+            "turn.completed must be drained into the audit log immediately"
+        );
     }
 }
