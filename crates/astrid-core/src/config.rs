@@ -252,6 +252,20 @@ impl AstridConfig {
         Ok((cfg, warnings))
     }
 
+    /// Write the config back to `<data_dir>/config.toml` (pretty). The MCP
+    /// server-management surface (phase 6) uses this to persist server
+    /// adds/removes/toggles made from the Android UI.
+    pub fn save(&self, data_dir: &Path) -> Result<()> {
+        let path = data_dir.join("config.toml");
+        let raw = toml::to_string_pretty(self)
+            .map_err(|e| Error::Config(format!("serialize config: {e}")))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, raw)?;
+        Ok(())
+    }
+
     /// Validate `key_ref` fields: an env-var NAME or empty — never an inline key.
     pub fn validate(&self) -> Result<()> {
         for (id, p) in &self.providers.providers {

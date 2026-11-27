@@ -182,9 +182,11 @@ version = "0.1.0"
 dependencies = [
  "astrid",
  "astrid-core",
+ "astrid-mcp",
  "astrid-memory",
  "astrid-providers",
  "astrid-tools",
+ "astrid-tui",
  "astrid-workforce",
  "reqwest",
  "rusqlite",

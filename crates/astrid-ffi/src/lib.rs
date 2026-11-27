@@ -17,7 +17,7 @@
 mod store;
 
 use astrid::session::{HeadlessApproval, Session, TurnReport};
-use astrid_core::config::{AstridConfig, Profile, ProviderConfig, ProvidersConfig};
+use astrid_core::config::{AstridConfig, McpServerConfig, Profile, ProviderConfig, ProvidersConfig};
 use astrid_core::events::{Event, NarrationKind, TurnOutcome};
 use astrid_tools::GateDecision;
 use astrid_memory::protocol::PageSummary;
@@ -87,6 +87,58 @@ pub struct MemoryPageRecord {
     pub kind: String,
     pub forgotten: bool,
     pub updated_at: String,
+}
+
+/// One configured MCP server (stdio transport): spawned + handshaked at
+/// session start, its tools adapted into the registry behind the same
+/// receipt pipeline as the builtins. Persisted in the [mcp] section of
+/// `<data_dir>/config.toml`.
+#[derive(Debug, Clone, Record)]
+pub struct McpServerRecord {
+    pub name: String,
+    /// Executable to spawn. On-device this is a bundled binary (jniLibs) or
+    /// an absolute path; spawn failures come back as probe text, never a
+    /// crash.
+    pub command: String,
+    pub args: Vec<String>,
+    /// Disabled servers stay in the config but never spawn.
+    pub enabled: bool,
+    /// Risk class override for this server's tools
+    /// (`safe|medium|high|external`); None = the default `high`.
+    pub default_risk: Option<String>,
+}
+
+/// Server names become tool-name segments (`mcp_<server>_<tool>`), so keep
+/// them slug-safe.
+fn mcp_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 48
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+fn mcp_name_error(name: &str) -> BridgeError {
+    BridgeError::Io {
+        msg: format!(
+            "server name `{name}` must be 1-48 chars of a-z 0-9 - _ (tool names are mcp_<server>_<tool>)"
+        ),
+    }
+}
+
+/// The FFI view of the configured server list.
+fn mcp_records(cfg: &AstridConfig) -> Vec<McpServerRecord> {
+    cfg.mcp
+        .servers
+        .iter()
+        .map(|s| McpServerRecord {
+            name: s.name.clone(),
+            command: s.command.clone(),
+            args: s.args.clone(),
+            enabled: s.enabled,
+            default_risk: s.default_risk.clone(),
+        })
+        .collect()
 }
 
 /// One plugin discovered by the manifest scan (possibly none, possibly broken).
@@ -176,6 +228,10 @@ pub struct Bridge {
     approvals: Mutex<Option<Arc<astrid_tui::ApprovalBridge>>>,
     /// The pending direct-shell approval: (approval_id, command, why).
     pending_shell: Mutex<Option<(String, String, String)>>,
+    /// The app data dir, remembered at attach time so config-only surfaces
+    /// (MCP server management) never need the core mutex — they work while a
+    /// turn runs, exactly like the approval surface.
+    data_dir: Mutex<PathBuf>,
 }
 
 /// The waiting turn-loop approval, for the live popup (phase 5.1).
@@ -384,6 +440,49 @@ fn provider_record(cfg: &ProviderCfg) -> ProviderRecord {
     }
 }
 
+/// Config-only helpers: NOT in the uniffi-exported impl (uniffi would demand
+/// FFI type bounds for AstridConfig). A plain impl keeps them private, usable
+/// while a turn runs, with no core mutex involved.
+impl Bridge {
+    fn mcp_load_cfg(&self) -> Result<AstridConfig, BridgeError> {
+        let dir = self
+            .data_dir
+            .lock()
+            .map_err(|_| BridgeError::Io {
+                msg: "data_dir lock poisoned".into(),
+            })?
+            .clone();
+        if dir.as_os_str().is_empty() {
+            return Err(BridgeError::Io {
+                msg: "core not attached yet".into(),
+            });
+        }
+        AstridConfig::load(&dir)
+            .map(|(c, _)| c)
+            .map_err(|e| BridgeError::Io {
+                msg: format!("config.toml: {e}"),
+            })
+    }
+
+    fn mcp_persist(
+        &self,
+        cfg: &mut AstridConfig,
+    ) -> Result<Vec<McpServerRecord>, BridgeError> {
+        let dir = self
+            .data_dir
+            .lock()
+            .map_err(|_| BridgeError::Io {
+                msg: "data_dir lock poisoned".into(),
+            })?
+            .clone();
+        cfg.save(&dir)
+            .map_err(|e| BridgeError::Io {
+                msg: format!("save config.toml: {e}"),
+            })?;
+        Ok(mcp_records(cfg))
+    }
+}
+
 #[uniffi::export]
 impl Bridge {
     /// Store-less bridge (phase-1 surface; unit tests use it on the host JVM).
@@ -395,6 +494,7 @@ impl Bridge {
             core: Mutex::new(None),
             approvals: Mutex::new(None),
             pending_shell: Mutex::new(None),
+            data_dir: Mutex::new(PathBuf::new()),
         }
     }
 
@@ -412,6 +512,7 @@ impl Bridge {
             core: Mutex::new(None),
             approvals: Mutex::new(None),
             pending_shell: Mutex::new(None),
+            data_dir: Mutex::new(PathBuf::new()),
         })
     }
 
@@ -431,6 +532,7 @@ impl Bridge {
             core: Mutex::new(None),
             approvals: Mutex::new(None),
             pending_shell: Mutex::new(None),
+            data_dir: Mutex::new(PathBuf::new()),
         };
         bridge.attach_core(PathBuf::from(data_dir))?;
         Ok(bridge)
@@ -650,6 +752,139 @@ impl Bridge {
         })?;
         self.append_event("memory.forget".into(), id.clone())?;
         Ok(ok)
+    }
+
+    // ---- MCP server management (phase 6) ---------------------------------
+    // The server list lives in the [mcp] section of <data_dir>/config.toml
+    // and is read/written WITHOUT the core mutex: the list stays editable
+    // while a turn runs, and edits apply at the next session start (or on
+    // the next probe).
+
+    /// Server names become tool-name segments (`mcp_<server>_<tool>`); the
+    /// slug check lives in the free fn below (uniffi forbids associated
+    /// functions without self in an exported impl).
+    pub fn mcp_name_ok(&self, name: String) -> bool {
+        mcp_name_ok(&name)
+    }
+
+    /// The configured MCP servers, read straight from config.toml.
+    pub fn mcp_servers(&self) -> Result<Vec<McpServerRecord>, BridgeError> {
+        let cfg = self.mcp_load_cfg()?;
+        Ok(mcp_records(&cfg))
+    }
+
+    /// Add one stdio MCP server (persisted; spawns at the next session
+    /// start). `default_risk` is an optional `safe|medium|high|external`.
+    pub fn add_mcp_server(
+        &self,
+        name: String,
+        command: String,
+        args: Vec<String>,
+        default_risk: Option<String>,
+    ) -> Result<Vec<McpServerRecord>, BridgeError> {
+        if !mcp_name_ok(&name) {
+            return Err(mcp_name_error(&name));
+        }
+        let command = command.trim().to_string();
+        if command.is_empty() {
+            return Err(BridgeError::Io {
+                msg: "command must not be empty".into(),
+            });
+        }
+        if let Some(r) = &default_risk {
+            astrid_mcp::parse_risk(r)
+                .map_err(|e| BridgeError::Io {
+                    msg: format!("default_risk: {e}"),
+                })?;
+        }
+        let mut cfg = self.mcp_load_cfg()?;
+        if cfg.mcp.servers.iter().any(|s| s.name == name) {
+            return Err(BridgeError::Io {
+                msg: format!("server `{name}` already exists"),
+            });
+        }
+        cfg.mcp.servers.push(McpServerConfig {
+            name,
+            command,
+            args,
+            env: Default::default(),
+            enabled: true,
+            default_risk,
+        });
+        self.mcp_persist(&mut cfg)
+    }
+
+    /// Remove a configured server (persisted).
+    pub fn remove_mcp_server(&self, name: String) -> Result<Vec<McpServerRecord>, BridgeError> {
+        let mut cfg = self.mcp_load_cfg()?;
+        let before = cfg.mcp.servers.len();
+        cfg.mcp.servers.retain(|s| s.name != name);
+        if cfg.mcp.servers.len() == before {
+            return Err(BridgeError::Io {
+                msg: format!("no server `{name}`"),
+            });
+        }
+        self.mcp_persist(&mut cfg)
+    }
+
+    /// Enable or disable a configured server without removing it (persisted).
+    pub fn set_mcp_server_enabled(
+        &self,
+        name: String,
+        enabled: bool,
+    ) -> Result<Vec<McpServerRecord>, BridgeError> {
+        let mut cfg = self.mcp_load_cfg()?;
+        let srv = cfg
+            .mcp
+            .servers
+            .iter_mut()
+            .find(|s| s.name == name)
+            .ok_or_else(|| BridgeError::Io {
+                msg: format!("no server `{name}`"),
+            })?;
+        srv.enabled = enabled;
+        self.mcp_persist(&mut cfg)
+    }
+
+    /// One-shot probe of a configured server: spawn, handshake, tools/list.
+    /// Nothing is attached to the session, and nothing here touches the core
+    /// mutex (the probe owns a throwaway single-thread runtime). Spawn or
+    /// handshake failures come back as `error: …` text — a failed probe is a
+    /// valid result the UI shows verbatim.
+    pub fn mcp_probe(&self, name: String) -> Result<String, BridgeError> {
+        let cfg = self.mcp_load_cfg()?;
+        let srv = cfg
+            .mcp
+            .servers
+            .iter()
+            .find(|s| s.name == name)
+            .ok_or_else(|| BridgeError::Io {
+                msg: format!("no server `{name}`"),
+            })?
+            .clone();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| BridgeError::Io {
+                msg: format!("probe runtime: {e}"),
+            })?;
+        Ok(rt.block_on(async {
+            match astrid_mcp::connect_and_adapt(&srv, 5_000).await {
+                Ok((client, adapters)) => {
+                    let info = client.server_info();
+                    let sname = info
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or(&name);
+                    let ver = info
+                        .get("version")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?");
+                    format!("ok: {} tools ({sname} v{ver})", adapters.len())
+                }
+                Err(e) => format!("error: {e}"),
+            }
+        }))
     }
 
     // ---- workforce (compiled-in roster + skills catalog) -------------------
@@ -1007,6 +1242,22 @@ impl Bridge {
             format!("{} → {} ({})", cfg.name, cfg.base_url, cfg.model),
         )?;
         Ok(provider_record(&cfg))
+    }
+
+    /// Clear the configured provider rung: back to the built-in ladder
+    /// (offline last). Settings uses it for "remove provider"; the hermetic
+    /// test setup uses it so one class's saved provider never leaks into the
+    /// next class's expectations (the chip-label order flake, root-caused).
+    pub fn clear_provider(&self) -> Result<(), BridgeError> {
+        let s = self.store.as_ref().ok_or(BridgeError::NoStore)?;
+        map_store(s.kv_del(PROVIDER_KV))?;
+        let data_dir = self.core_call(|core| core.data_dir.clone())?;
+        self.attach_core(data_dir)?;
+        self.append_event(
+            "provider.cleared".into(),
+            "back to the built-in ladder".into(),
+        )?;
+        Ok(())
     }
 
     /// The effective ladder in try-order (Settings > Providers renders and
@@ -1386,10 +1637,25 @@ impl Bridge {
     fn attach_core(&self, data_dir: PathBuf) -> Result<(), BridgeError> {
         map_io(std::fs::create_dir_all(&data_dir))?;
 
+        // Remember the data dir: config-only surfaces (MCP servers) read and
+        // write it without the core mutex.
+        if let Ok(mut slot) = self.data_dir.lock() {
+            *slot = data_dir.clone();
+        }
+
         let mut cfg = AstridConfig::default();
         cfg.data_dir = data_dir.clone();
         cfg.permissions = Profile::Auto;
-        cfg.mcp.enabled = false; // stdio MCP servers are a phase-9 surface
+        // MCP servers (phase 6): the [mcp] section of <data_dir>/config.toml
+        // is the store — empty by default, so nothing spawns until the user
+        // adds a server. Configured servers spawn + handshake at session
+        // start; their tools join the registry behind the SAME receipt
+        // pipeline as builtins (tool risk defaults to High: approval-gated
+        // calls). A malformed config falls back to defaults rather than
+        // failing the app start.
+        cfg.mcp = AstridConfig::load(&data_dir)
+            .map(|(c, _)| c.mcp)
+            .unwrap_or_default();
         let mut custom_name: Option<String> = None;
         if let Some(json) = map_store(
             self.store
@@ -1481,6 +1747,143 @@ uniffi::setup_scaffolding!("astrid_ffi");
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mcp_test_bridge() -> (tempfile::TempDir, Bridge) {
+        let dir = tempfile::tempdir().unwrap();
+        let b = Bridge::with_core(
+            dir.path().join("astrid.db").to_string_lossy().to_string(),
+            dir.path().to_string_lossy().to_string(),
+        )
+        .unwrap();
+        (dir, b)
+    }
+
+    #[test]
+    fn mcp_servers_persist_to_config_toml() {
+        let (_dir, b) = mcp_test_bridge();
+        // The surface is config-only: no core mutex, works any time.
+        assert!(b.mcp_servers().unwrap().is_empty());
+
+        let after = b
+            .add_mcp_server(
+                "demo".to_string(),
+                "/bin/true".to_string(),
+                vec!["--x".to_string()],
+                None,
+            )
+            .unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].name, "demo");
+        assert_eq!(after[0].command, "/bin/true");
+        assert!(after[0].enabled);
+        assert_eq!(after[0].default_risk, None);
+
+    }
+
+    #[test]
+    fn mcp_config_survives_a_bridge_rebuild() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let db = dir.path().join("astrid.db").to_string_lossy().to_string();
+        let b = Bridge::with_core(db.clone(), path.clone()).unwrap();
+        b.add_mcp_server(
+            "keeper".to_string(),
+            "/bin/true".to_string(),
+            vec![],
+            Some("external".to_string()),
+        )
+        .unwrap();
+        // A brand-new bridge over the same data dir reads the same config.
+        let b2 = Bridge::with_core(db, path).unwrap();
+        let servers = b2.mcp_servers().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "keeper");
+        assert_eq!(servers[0].default_risk.as_deref(), Some("external"));
+    }
+
+    #[test]
+    fn mcp_add_rejects_bad_names_empty_commands_and_bad_risks() {
+        let (_dir, b) = mcp_test_bridge();
+        // names become tool-name segments: slug-safe only
+        assert!(b
+            .add_mcp_server("Bad Name".to_string(), "/bin/true".to_string(), vec![], None)
+            .is_err());
+        assert!(b
+            .add_mcp_server("x".repeat(49), "/bin/true".to_string(), vec![], None)
+            .is_err());
+        // empty command
+        assert!(b
+            .add_mcp_server("ok".to_string(), "   ".to_string(), vec![], None)
+            .is_err());
+        // unknown risk class
+        assert!(b
+            .add_mcp_server(
+                "ok".to_string(),
+                "/bin/true".to_string(),
+                vec![],
+                Some("banana".to_string())
+            )
+            .is_err());
+        // valid add, then a duplicate add fails
+        assert!(b
+            .add_mcp_server("ok".to_string(), "/bin/true".to_string(), vec![], None)
+            .is_ok());
+        assert!(b
+            .add_mcp_server("ok".to_string(), "/bin/true".to_string(), vec![], None)
+            .is_err());
+        // remove then toggle errors once gone
+        assert!(b.remove_mcp_server("ok".to_string()).unwrap().is_empty());
+        assert!(b.set_mcp_server_enabled("ok".to_string(), true).is_err());
+    }
+
+    #[test]
+    fn mcp_probe_reports_a_real_handshake_or_an_error_line() {
+        let py = match std::process::Command::new("python3")
+            .arg("-c")
+            .arg("print(1)")
+            .output()
+        {
+            Ok(_) => true,
+            Err(_) => {
+                eprintln!("python3 not available; skipping probe test");
+                return;
+            }
+        };
+        let _ = py;
+        let dir = tempfile::tempdir().unwrap();
+        let b = Bridge::with_core(
+            dir.path().join("astrid.db").to_string_lossy().to_string(),
+            dir.path().to_string_lossy().to_string(),
+        )
+        .unwrap();
+        // unknown server: a BridgeError, not probe text
+        assert!(b.mcp_probe("nope".to_string()).is_err());
+
+        // real handshake against the bundled fake stdio server
+        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fake_mcp_server.py");
+        b.add_mcp_server(
+            "demo".to_string(),
+            "python3".to_string(),
+            vec![script.to_string()],
+            None,
+        )
+        .unwrap();
+        let line = b.mcp_probe("demo".to_string()).unwrap();
+        assert!(line.starts_with("ok:"), "probe line: {line}");
+        assert!(line.contains("1 tools"), "probe line: {line}");
+        assert!(line.contains("fake-demo"), "probe line: {line}");
+
+        // a dead binary surfaces as text, not an error
+        b.add_mcp_server(
+            "broken".to_string(),
+            "/nonexistent-binary-xyz".to_string(),
+            vec![],
+            None,
+        )
+        .unwrap();
+        let broken = b.mcp_probe("broken".to_string()).unwrap();
+        assert!(broken.starts_with("error:"), "probe line: {broken}");
+    }
 
     #[test]
     fn ladder_order_handles_the_hermetic_offline_only_order() {

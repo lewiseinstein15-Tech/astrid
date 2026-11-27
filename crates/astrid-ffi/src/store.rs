@@ -255,6 +255,12 @@ impl Store {
         })
     }
 
+    pub fn kv_del(&self, key: &str) -> rusqlite::Result<()> {
+        self.lock()
+            .execute("DELETE FROM kv WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     pub fn kv_set(&self, key: &str, value: &str) -> rusqlite::Result<()> {
         self.lock().execute(
             "INSERT INTO kv (key, value) VALUES (?1, ?2)

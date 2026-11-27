@@ -15,6 +15,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -243,18 +246,119 @@ fun PluginsScreen(bridge: Bridge, onMenu: () -> Unit) {
     }
 }
 
-/** 14 — MCP Servers: the session's real connection report. */
+/** 14 — MCP Servers: configure stdio servers, probe them, manage the list.
+ *
+ * The list lives in the [mcp] section of the app's config.toml (phase 6):
+ * add / toggle / remove are quick config writes; the PROBE spawns the server,
+ * handshakes, and counts its tools — it owns a process, so it runs on
+ * Dispatchers.IO, never the UI thread (the 0.1.5 ANR lesson).
+ */
 @Composable
 fun McpServersScreen(bridge: Bridge, onMenu: () -> Unit) {
-    val report = remember { runCatching { bridge.mcpReport() }.getOrDefault(emptyList()) }
+    var servers by remember { mutableStateOf(runCatching { bridge.mcpServers() }.getOrDefault(emptyList())) }
+    var report by remember { mutableStateOf(runCatching { bridge.mcpReport() }.getOrDefault(emptyList())) }
+    var adding by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var command by remember { mutableStateOf("") }
+    var args by remember { mutableStateOf("") }
+    var risk by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    /** One probe result line per server name, shown under its row. */
+    var probeLines by remember { mutableStateOf(emptyMap<String, String>()) }
+    val scope = rememberCoroutineScope()
+
+    fun refresh() {
+        servers = runCatching { bridge.mcpServers() }.getOrDefault(servers)
+        report = runCatching { bridge.mcpReport() }.getOrDefault(report)
+    }
+
     ScreenScaffold("MCP Servers", AccentIndigo, onMenu) {
+        SectionLabel("CONFIGURED SERVERS · ${servers.size}", AccentIndigo)
+        if (servers.isEmpty()) {
+            Card {
+                KitText("No MCP servers yet.", TextPrimary, 13, FontWeight.Bold)
+                KitText(
+                    "Add one below. At the next app start its process spawns, its " +
+                        "tools join the registry (mcp_<server>_<tool>), and every call " +
+                        "is approval-gated like the built-in tools. Probe connects " +
+                        "right now and counts the tools without attaching anything.",
+                    TextMuted, 12, FontWeight.Medium
+                )
+            }
+        }
+        servers.forEach { server ->
+            val subtitle = buildString {
+                append(server.command)
+                server.args.forEach { append(" ").append(it) }
+                server.defaultRisk?.let { append("  ·  risk: ").append(it) }
+            }
+            ListRow(
+                letter = server.name.firstOrNull()?.uppercase() ?: "·",
+                accent = AccentIndigo,
+                title = server.name,
+                subtitle = subtitle,
+                chipLabel = if (server.enabled) "on" else "off",
+                chipAccent = if (server.enabled) AccentGreen else AccentSlate,
+                tag = "mcp/${server.name}"
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlineButton("Probe", AccentIndigo, tag = "mcp/probe/${server.name}") {
+                    scope.launch(Dispatchers.IO) {
+                        val line = runCatching { bridge.mcpProbe(server.name) }
+                            .getOrElse { "error: ${it.message}" }
+                        probeLines = probeLines + (server.name to line)
+                    }
+                }
+                OutlineButton(if (server.enabled) "Disable" else "Enable", AccentSlate, tag = "mcp/toggle/${server.name}") {
+                    runCatching { bridge.setMcpServerEnabled(server.name, !server.enabled) }
+                        .onFailure { error = it.message }
+                    refresh()
+                }
+                OutlineButton("Remove", Danger, tag = "mcp/remove/${server.name}") {
+                    runCatching { bridge.removeMcpServer(server.name) }
+                        .onFailure { error = it.message }
+                    refresh()
+                }
+            }
+            probeLines[server.name]?.let { line ->
+                Card { KitText(line, TextMuted, 12, FontWeight.Medium) }
+            }
+        }
+        if (adding) {
+            Card {
+                FormField("Name (a-z 0-9 - _)", name, tag = "mcp/name") { name = it }
+                FormField("Command (executable path)", command, tag = "mcp/command") { command = it }
+                FormField("Arguments (space-separated)", args, tag = "mcp/args") { args = it }
+                FormField("Risk class — optional: safe|medium|high|external", risk, tag = "mcp/risk") { risk = it }
+                FilledButton("Save server", AccentIndigo, tag = "mcp/save") {
+                    val parsed = if (args.isBlank()) emptyList() else args.trim().split(Regex("\\s+"))
+                    runCatching {
+                        bridge.addMcpServer(
+                            name.trim(), command.trim(), parsed,
+                            risk.trim().takeIf { it.isNotEmpty() },
+                        )
+                    }
+                        .onSuccess {
+                            name = ""; command = ""; args = ""; risk = ""
+                            adding = false; error = null
+                            refresh()
+                        }
+                        .onFailure { error = it.message }
+                }
+            }
+        } else {
+            FilledButton("Add server", AccentIndigo, tag = "mcp/add") { adding = true }
+        }
+        error?.let { msg ->
+            Card { KitText(msg, Danger, 12, FontWeight.Medium) }
+        }
+
         SectionLabel("CONNECTION REPORT · SESSION START", AccentIndigo)
         if (report.isEmpty()) {
             Card {
-                KitText("No MCP servers configured.", TextPrimary, 13, FontWeight.Bold)
                 KitText(
-                    "Servers connect over stdio and adapt into the tool registry. " +
-                        "On-device server management lands with the approvals phase (9).",
+                    "Nothing connected at session start — the report fills in once a " +
+                        "configured server spawns.",
                     TextMuted, 12, FontWeight.Medium
                 )
             }

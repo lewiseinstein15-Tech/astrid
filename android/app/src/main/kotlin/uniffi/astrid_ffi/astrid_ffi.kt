@@ -675,6 +675,8 @@ internal object IntegrityCheckingUniffiLib {
     }
 
     internal fun ensureInitialized() = Unit
+    external fun uniffi_astrid_ffi_checksum_method_bridge_add_mcp_server(
+    ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_add_rule(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_add_task(
@@ -691,6 +693,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_chat_sessions(
     ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_clear_provider(
+    ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_connectors(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_delete_rule(
@@ -705,7 +709,13 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_ladder_rungs(
     ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_mcp_name_ok(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_mcp_probe(
+    ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_mcp_report(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_mcp_servers(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_memories(
     ): Int
@@ -731,6 +741,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_remember(
     ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_remove_mcp_server(
+    ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_resolve_approval(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_resolve_shell(
@@ -748,6 +760,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_astrid_ffi_checksum_method_bridge_set_connector(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_set_ladder(
+    ): Int
+    external fun uniffi_astrid_ffi_checksum_method_bridge_set_mcp_server_enabled(
     ): Int
     external fun uniffi_astrid_ffi_checksum_method_bridge_set_provider(
     ): Int
@@ -799,6 +813,8 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_astrid_ffi_fn_constructor_bridge_with_store(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_astrid_ffi_fn_method_bridge_add_mcp_server(`ptr`: Long,`name`: RustBuffer.ByValue,`command`: RustBuffer.ByValue,`args`: RustBuffer.ByValue,`defaultRisk`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_add_rule(`ptr`: Long,`pattern`: RustBuffer.ByValue,`decision`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_add_task(`ptr`: Long,`name`: RustBuffer.ByValue,`everyMinutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
@@ -815,6 +831,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_chat_sessions(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_clear_provider(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_astrid_ffi_fn_method_bridge_connectors(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_delete_rule(`ptr`: Long,`id`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -829,7 +847,13 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_ladder_rungs(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_mcp_name_ok(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_astrid_ffi_fn_method_bridge_mcp_probe(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_mcp_report(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_mcp_servers(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_memories(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -855,6 +879,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_remember(`ptr`: Long,`topic`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_remove_mcp_server(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_resolve_approval(`ptr`: Long,`approved`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     external fun uniffi_astrid_ffi_fn_method_bridge_resolve_shell(`ptr`: Long,`approvalId`: RustBuffer.ByValue,`approved`: Byte,uniffi_out_err: UniffiRustCallStatus, 
@@ -872,6 +898,8 @@ internal object UniffiLib {
     external fun uniffi_astrid_ffi_fn_method_bridge_set_connector(`ptr`: Long,`id`: RustBuffer.ByValue,`state`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_astrid_ffi_fn_method_bridge_set_ladder(`ptr`: Long,`order`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_astrid_ffi_fn_method_bridge_set_mcp_server_enabled(`ptr`: Long,`name`: RustBuffer.ByValue,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_astrid_ffi_fn_method_bridge_set_provider(`ptr`: Long,`name`: RustBuffer.ByValue,`baseUrl`: RustBuffer.ByValue,`apiKey`: RustBuffer.ByValue,`model`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1006,6 +1034,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_add_mcp_server() and 0xFFFF) != 35052) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_add_rule() and 0xFFFF) != 12040) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1030,6 +1061,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_chat_sessions() and 0xFFFF) != 45533) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_clear_provider() and 0xFFFF) != 14267) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_connectors() and 0xFFFF) != 60938) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1051,7 +1085,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_ladder_rungs() and 0xFFFF) != 64837) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_mcp_name_ok() and 0xFFFF) != 59485) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_mcp_probe() and 0xFFFF) != 5842) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_mcp_report() and 0xFFFF) != 45558) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_mcp_servers() and 0xFFFF) != 19) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_memories() and 0xFFFF) != 14902) {
@@ -1090,6 +1133,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_remember() and 0xFFFF) != 10427) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_remove_mcp_server() and 0xFFFF) != 9243) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_resolve_approval() and 0xFFFF) != 26762) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1115,6 +1161,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_ladder() and 0xFFFF) != 2612) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_mcp_server_enabled() and 0xFFFF) != 15889) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_astrid_ffi_checksum_method_bridge_set_provider() and 0xFFFF) != 49089) {
@@ -1554,6 +1603,12 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
  */
 public interface BridgeInterface {
     
+    /**
+     * Add one stdio MCP server (persisted; spawns at the next session
+     * start). `default_risk` is an optional `safe|medium|high|external`.
+     */
+    fun `addMcpServer`(`name`: kotlin.String, `command`: kotlin.String, `args`: List<kotlin.String>, `defaultRisk`: kotlin.String?): List<McpServerRecord>
+    
     fun `addRule`(`pattern`: kotlin.String, `decision`: kotlin.String): RuleRecord
     
     fun `addTask`(`name`: kotlin.String, `everyMinutes`: kotlin.UInt): TaskRecord
@@ -1579,6 +1634,14 @@ public interface BridgeInterface {
     
     fun `chatSessions`(): List<ChatSessionRecord>
     
+    /**
+     * Clear the configured provider rung: back to the built-in ladder
+     * (offline last). Settings uses it for "remove provider"; the hermetic
+     * test setup uses it so one class's saved provider never leaks into the
+     * next class's expectations (the chip-label order flake, root-caused).
+     */
+    fun `clearProvider`()
+    
     fun `connectors`(): List<ConnectorRecord>
     
     fun `deleteRule`(`id`: kotlin.Long): kotlin.Boolean
@@ -1598,9 +1661,30 @@ public interface BridgeInterface {
     fun `ladderRungs`(): List<LadderRungRecord>
     
     /**
+     * Server names become tool-name segments (`mcp_<server>_<tool>`); the
+     * slug check lives in the free fn below (uniffi forbids associated
+     * functions without self in an exported impl).
+     */
+    fun `mcpNameOk`(`name`: kotlin.String): kotlin.Boolean
+    
+    /**
+     * One-shot probe of a configured server: spawn, handshake, tools/list.
+     * Nothing is attached to the session, and nothing here touches the core
+     * mutex (the probe owns a throwaway single-thread runtime). Spawn or
+     * handshake failures come back as `error: …` text — a failed probe is a
+     * valid result the UI shows verbatim.
+     */
+    fun `mcpProbe`(`name`: kotlin.String): kotlin.String
+    
+    /**
      * The MCP connection report lines the session recorded at startup.
      */
     fun `mcpReport`(): List<kotlin.String>
+    
+    /**
+     * The configured MCP servers, read straight from config.toml.
+     */
+    fun `mcpServers`(): List<McpServerRecord>
     
     fun `memories`(): List<MemoryPageRecord>
     
@@ -1645,6 +1729,11 @@ public interface BridgeInterface {
     fun `recordPhoto`(`path`: kotlin.String): PhotoRecord
     
     fun `remember`(`topic`: kotlin.String, `body`: kotlin.String): kotlin.String
+    
+    /**
+     * Remove a configured server (persisted).
+     */
+    fun `removeMcpServer`(`name`: kotlin.String): List<McpServerRecord>
     
     /**
      * Answer the pending turn-loop approval (the one the core asked via
@@ -1699,6 +1788,11 @@ public interface BridgeInterface {
      * ["offline"] is valid and yields offline-only service.
      */
     fun `setLadder`(`order`: List<kotlin.String>): List<LadderRungRecord>
+    
+    /**
+     * Enable or disable a configured server without removing it (persisted).
+     */
+    fun `setMcpServerEnabled`(`name`: kotlin.String, `enabled`: kotlin.Boolean): List<McpServerRecord>
     
     /**
      * Persist the provider rung and rebuild the session so the ladder
@@ -1847,6 +1941,28 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     }
 
     
+    /**
+     * Add one stdio MCP server (persisted; spawns at the next session
+     * start). `default_risk` is an optional `safe|medium|high|external`.
+     */
+    @Throws(BridgeException::class)override fun `addMcpServer`(`name`: kotlin.String, `command`: kotlin.String, `args`: List<kotlin.String>, `defaultRisk`: kotlin.String?): List<McpServerRecord> {
+            return FfiConverterSequenceTypeMcpServerRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_add_mcp_server(
+        it,
+        
+        FfiConverterString.lower(`name`),
+        FfiConverterString.lower(`command`),
+        FfiConverterSequenceString.lower(`args`),
+        FfiConverterOptionalString.lower(`defaultRisk`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(BridgeException::class)override fun `addRule`(`pattern`: kotlin.String, `decision`: kotlin.String): RuleRecord {
             return FfiConverterTypeRuleRecord.lift(
     callWithHandle {
@@ -1971,6 +2087,25 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     
 
     
+    /**
+     * Clear the configured provider rung: back to the built-in ladder
+     * (offline last). Settings uses it for "remove provider"; the hermetic
+     * test setup uses it so one class's saved provider never leaks into the
+     * next class's expectations (the chip-label order flake, root-caused).
+     */
+    @Throws(BridgeException::class)override fun `clearProvider`()
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_clear_provider(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
     @Throws(BridgeException::class)override fun `connectors`(): List<ConnectorRecord> {
             return FfiConverterSequenceTypeConnectorRecord.lift(
     callWithHandle {
@@ -2077,6 +2212,47 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
 
     
     /**
+     * Server names become tool-name segments (`mcp_<server>_<tool>`); the
+     * slug check lives in the free fn below (uniffi forbids associated
+     * functions without self in an exported impl).
+     */override fun `mcpNameOk`(`name`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_mcp_name_ok(
+        it,
+        
+        FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * One-shot probe of a configured server: spawn, handshake, tools/list.
+     * Nothing is attached to the session, and nothing here touches the core
+     * mutex (the probe owns a throwaway single-thread runtime). Spawn or
+     * handshake failures come back as `error: …` text — a failed probe is a
+     * valid result the UI shows verbatim.
+     */
+    @Throws(BridgeException::class)override fun `mcpProbe`(`name`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_mcp_probe(
+        it,
+        
+        FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * The MCP connection report lines the session recorded at startup.
      */
     @Throws(BridgeException::class)override fun `mcpReport`(): List<kotlin.String> {
@@ -2084,6 +2260,23 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
     callWithHandle {
     uniffiRustCallWithError(BridgeException) { _status ->
     UniffiLib.uniffi_astrid_ffi_fn_method_bridge_mcp_report(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The configured MCP servers, read straight from config.toml.
+     */
+    @Throws(BridgeException::class)override fun `mcpServers`(): List<McpServerRecord> {
+            return FfiConverterSequenceTypeMcpServerRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_mcp_servers(
         it,
         _status)
 }
@@ -2287,6 +2480,24 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
 
     
     /**
+     * Remove a configured server (persisted).
+     */
+    @Throws(BridgeException::class)override fun `removeMcpServer`(`name`: kotlin.String): List<McpServerRecord> {
+            return FfiConverterSequenceTypeMcpServerRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_remove_mcp_server(
+        it,
+        
+        FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Answer the pending turn-loop approval (the one the core asked via
      * Event::ApprovalRequested). Returns false when nothing was pending.
      * The registry emits approval.resolved either way; drain_audit lands
@@ -2448,6 +2659,25 @@ open class Bridge: Disposable, AutoCloseable, BridgeInterface
         it,
         
         FfiConverterSequenceString.lower(`order`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Enable or disable a configured server without removing it (persisted).
+     */
+    @Throws(BridgeException::class)override fun `setMcpServerEnabled`(`name`: kotlin.String, `enabled`: kotlin.Boolean): List<McpServerRecord> {
+            return FfiConverterSequenceTypeMcpServerRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BridgeException) { _status ->
+    UniffiLib.uniffi_astrid_ffi_fn_method_bridge_set_mcp_server_enabled(
+        it,
+        
+        FfiConverterString.lower(`name`),
+        FfiConverterBoolean.lower(`enabled`),_status)
 }
     }
     )
@@ -3073,6 +3303,77 @@ public object FfiConverterTypeLadderRungRecord: FfiConverterRustBuffer<LadderRun
             FfiConverterString.write(value.`id`, buf)
             FfiConverterString.write(value.`desc`, buf)
             FfiConverterBoolean.write(value.`builtin`, buf)
+    }
+}
+
+
+
+/**
+ * One configured MCP server (stdio transport): spawned + handshaked at
+ * session start, its tools adapted into the registry behind the same
+ * receipt pipeline as the builtins. Persisted in the [mcp] section of
+ * `<data_dir>/config.toml`.
+ */
+data class McpServerRecord (
+    var `name`: kotlin.String
+    , 
+    /**
+     * Executable to spawn. On-device this is a bundled binary (jniLibs) or
+     * an absolute path; spawn failures come back as probe text, never a
+     * crash.
+     */
+    var `command`: kotlin.String
+    , 
+    var `args`: List<kotlin.String>
+    , 
+    /**
+     * Disabled servers stay in the config but never spawn.
+     */
+    var `enabled`: kotlin.Boolean
+    , 
+    /**
+     * Risk class override for this server's tools
+     * (`safe|medium|high|external`); None = the default `high`.
+     */
+    var `defaultRisk`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMcpServerRecord: FfiConverterRustBuffer<McpServerRecord> {
+    override fun read(buf: ByteBuffer): McpServerRecord {
+        return McpServerRecord(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: McpServerRecord) = (
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`command`) +
+            FfiConverterSequenceString.allocationSize(value.`args`) +
+            FfiConverterBoolean.allocationSize(value.`enabled`) +
+            FfiConverterOptionalString.allocationSize(value.`defaultRisk`)
+    )
+
+    override fun write(value: McpServerRecord, buf: ByteBuffer) {
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`command`, buf)
+            FfiConverterSequenceString.write(value.`args`, buf)
+            FfiConverterBoolean.write(value.`enabled`, buf)
+            FfiConverterOptionalString.write(value.`defaultRisk`, buf)
     }
 }
 
@@ -4057,6 +4358,34 @@ public object FfiConverterSequenceTypeLadderRungRecord: FfiConverterRustBuffer<L
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeLadderRungRecord.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeMcpServerRecord: FfiConverterRustBuffer<List<McpServerRecord>> {
+    override fun read(buf: ByteBuffer): List<McpServerRecord> {
+        val len = buf.getInt()
+        return List<McpServerRecord>(len) {
+            FfiConverterTypeMcpServerRecord.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<McpServerRecord>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMcpServerRecord.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<McpServerRecord>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMcpServerRecord.write(it, buf)
         }
     }
 }

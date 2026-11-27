@@ -70,8 +70,14 @@ class AstridUiTest {
         AstridBridge.init(context.filesDir)
         // FakeServerPathTest configures a 'fake' provider on the shared
         // bridge singleton and runs before this class (alphabetical test
-        // order); clear the provider config so the composer chip falls back
-        // to the built-in kilo-auto/free label.
+        // order); CLEAR it loudly (a silent failure here was the chip-label
+        // order flake) so the composer chip falls back to the built-in
+        // kilo-auto/free label.
+        try {
+            bridge.clearProvider()
+        } catch (e: Exception) {
+            throw IllegalStateException("hermetic provider clear failed", e)
+        }
         runCatching { bridge.setLadder(listOf("offline")) }
         // ApprovalFlowTest runs before this class and its popup test leaves
         // an approval pending on the shared bridge singleton; the ApprovalHost
